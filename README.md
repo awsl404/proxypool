@@ -37,6 +37,7 @@ internal/proxypool/         后端业务代码、SQLite 仓储、代理协议和
 internal/proxypool/storage/ sqlc schema、查询文件和生成的类型安全 Go 查询代码
 internal/proxypool/webui/   离线 Web 控制台静态资源
 configs/                    示例配置文件
+docs/                       功能说明文档（自定义抓取等）
 scripts/                    跨平台构建脚本
 bin/                        本地开发构建产物
 dist/                       Windows/Linux amd64 发布产物
@@ -98,6 +99,16 @@ http,host,port,user,pass
 ### 自定义网站抓取
 
 支持在 UI 的“自定义抓取”页面配置不同代理网站的抓取模板，例如 `https://proxy.scdn.io/`。
+
+> 详细的字段说明、正则写法、分页策略、API 调用和问题排查见 [docs/custom-scraper.md](docs/custom-scraper.md)。
+
+#### 快速上手
+
+1. 进入“自定义抓取”页面，点击“新建”，填写名称和 URL 模板（支持 `{page}`、`{size}` 占位符）。
+2. 页面只提供 `IP:端口` 时，在“默认协议标签”勾选候选协议（可多选，会按所选协议分别导入）。
+3. 点击“测试提取”，预览实际请求的 URL 和提取到的代理，确认无误后“保存模板”。
+4. 点击“运行抓取”后台执行，可在“运行结果”页签查看过程日志，也可中途停止。
+5. 导入结果进入代理池，来源统计进入“采集源质量统计”。
 
 模板支持：
 
