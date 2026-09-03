@@ -23,10 +23,12 @@ go build -buildvcs=false -o .\bin\proxypool.exe .\cmd\proxypool
 .\bin\proxypool.exe -config .\config.json -db .\data\proxypool.db
 ```
 
-Linux amd64 运行方式：
+Linux/macOS amd64 解压发布包后运行：
 
 ```bash
-./dist/proxypool-linux-amd64 -config ./config.json -db ./data/proxypool.db
+tar -xzf dist/proxypool-linux-amd64.tar.gz -C proxypool-linux
+cd proxypool-linux/proxypool-linux-amd64
+./proxypool -config ./config.json -db ./data/proxypool.db
 ```
 
 ## 项目结构
@@ -40,7 +42,7 @@ configs/                    示例配置文件
 docs/                       功能说明文档（自定义抓取等）
 scripts/                    跨平台构建脚本
 bin/                        本地开发构建产物
-dist/                       Windows/Linux amd64 发布产物
+dist/                       跨平台发布压缩包（Windows/Linux/macOS × amd64/arm64）
 data/                       SQLite 运行时数据
 logs/                       运行日志
 ```
@@ -63,6 +65,17 @@ logs/                       运行日志
 - 支持导出当前筛选结果为 `proxies.txt`。
 - 支持清理不可用或已禁用代理。
 - 支持后台检测全部代理。
+
+### 失效档案
+
+达到失败阈值被移出代理池的代理不会直接丢弃，而是进入“失效档案”页归档：
+
+- 归档记录保留失败次数、来源、最近失败时间和最近错误。
+- 归档中处于“正在跳过”状态的记录会拦截同参数代理再次导入，避免失效代理被采集源反复拉回。
+- 对单个档案记录可“关闭跳过”（允许重新导入）或“启用跳过”。
+- 支持按主机、来源或错误关键词搜索，按跳过状态筛选。
+- 支持删除单条归档记录或清空全部档案。
+- 档案列表支持分页浏览，页面可选择每页 `10`、`20`、`50`、`100` 条。
 
 ### 批量导入
 
@@ -147,13 +160,16 @@ http,host,port,user,pass
 - 自定义抓取模板列表支持分页浏览，页面可选择每页 `10`、`20`、`50`、`100` 条。
 - 自定义抓取页面提供“字段说明”折叠区，用于说明每项配置的用途和常见填写方式。
 
-内置示例模板：
+内置示例模板（“载入示例”按钮）：
 
 ```text
-URL 模板：https://proxy.scdn.io/api/get_proxy.php?protocol=all&count=20
-页码模式：固定范围，1-1
-默认协议标签：http
-提取正则：(?P<host>...):(?P<port>...)
+名称：proxy.scdn.io 示例
+URL 模板：https://proxy.scdn.io/get_proxies.php?protocol=SOCKS5&country=&per_page={size}&page={page}
+页码模式：固定范围，1-100，每页 100
+默认协议标签：socks5
+请求超时：按全局设置
+并发页数：1，失败重试 1 次，失败 1 次即停止
+提取正则：默认通用正则（scheme/host/user/password/port 分组）
 ```
 
 `proxy.scdn.io` 即使返回 JSON，也会按响应文本用通用正则提取其中的 `host:port`。
@@ -384,146 +400,7 @@ Web UI 不依赖 CDN、外部字体、外部 JS 或外部 CSS。
 - 配置文件：`config.json`
 - 日志文件：`logs/proxypool.log`
 
-## 近期操作记录
-
-### 项目结构现代化
-
-- 入口迁移到 `cmd/proxypool`，统一通过 `go build ./cmd/proxypool` 构建。
-- 后端业务代码迁移到 `internal/proxypool`，避免根目录堆放大量 Go 文件。
-- 离线 UI 静态资源迁移到 `internal/proxypool/webui`，继续通过 Go `embed` 打包进二进制。
-- 引入 `sqlc` 管理 SQLite 查询，schema 和查询文件集中在 `internal/proxypool/storage`。
-- 新增 `configs/config.example.json`、`.editorconfig`、`.gitignore`。
-- 新增 `scripts/build.ps1` 和 `scripts/build.sh`，支持生成 Windows amd64 与 Linux amd64 发布产物。
-- 构建产物统一放入 `bin/` 和 `dist/`，旧 stdout/stderr 日志移动到 `logs/`。
-
-### SQL 访问现代化
-
-- 新增 `sqlc.yaml`，使用 `sqlc v1.27.0` 生成 `database/sql` 查询代码。
-- `internal/proxypool/storage/schema.sql` 作为 sqlc schema，同时被运行时 migration 复用，避免 schema 在 Go 字符串和 SQL 文件中重复维护。
-- 代理池核心查询已迁移到 sqlc，包括导入、筛选列表、候选轮询、状态更新、匿名性更新、失败删除和统计汇总。
-- 采集源质量统计已迁移到 sqlc，包括 upsert、查询、删除单条和清空。
-- 自定义抓取模板已迁移到 sqlc，包括列表、读取、新增、更新、删除和运行结果标记。
-- `settings` 表仍保留少量手写 SQL，因为它是 key/value 批量同步逻辑，动态性较强且代码量小。
-
-### UI 视觉优化
-
-- 控制台整体调整为更现代的浅灰工作区和深色侧栏组合。
-- 按钮、输入框、选择框、标签和日志区域改为更圆润的视觉风格。
-- 表格增加更轻的边框、悬停状态和更清晰的 sticky 表头。
-- 指标卡片、主内容面板和登录页阴影更柔和，提升后台工具的层次感。
-- 前端静态资源版本和 service worker 缓存版本已更新，避免继续加载旧样式。
-
-### 统计和日志管理增强
-
-- 采集源质量统计新增搜索框，可按来源 URL 或最近错误查询。
-- 采集源质量统计新增“仅失败来源”筛选。
-- 支持删除单条采集源统计，或清空全部采集源统计。
-- 运行日志新增关键词查询和日志等级筛选。
-- 支持从 UI 清空当前日志文件。
-
-### 自定义抓取增强
-
-- 新增“自定义抓取”页面，用于统一管理自定义代理网站模板。
-- 支持 `https://proxy.scdn.io/` 这类站点的通用模板配置。
-- 支持 URL 页码模板、固定页码范围、全部页自动识别、最大页数限制。
-- 支持自定义页数识别正则、页数组名、代理提取正则和代理字段分组。
-- 自定义抓取页面已移除 JSON API 提取配置，统一使用通用正则从响应文本中提取代理。
-- 支持自定义抓取出口独立配置：本机直连、通过当前代理池、通过指定代理。
-- 支持自定义抓取导入后是否立即验证。
-- 支持自定义抓取超时、并发页数、失败重试和失败自动停止配置。
-
-### 任务日志和停止任务
-
-- 采集任务和自定义抓取任务新增过程日志。
-- 过程日志包含请求 URL、HTTP 状态、响应大小、响应预览、解析数量、提取数量、导入/重复/验证统计和错误明细。
-- 每个任务最多保留最近 300 条过程日志，避免后端任务数据无限增长。
-- 新增停止任务接口：`POST /api/collector/jobs/{id}/stop`。
-- UI 增加“停止当前任务”按钮，任务状态支持 `running`、`stopping`、`stopped`、`done`。
-- 任务日志区域改为固定高度滚动显示，并在刷新时自动滚动到底部，避免页面被长日志撑高。
-- 修复空列表接口返回 `null` 导致前端访问 `length` 报错的问题，空代理、空采集源、空自定义模板统一按空数组处理。
-- 清理不可用/禁用代理后会重新加载列表，空列表场景不再出现 `Cannot read properties of null (reading 'length')`。
-
-### 批量检测增强
-
-- 手动后台检测新增检测范围选择，不必每次检测全部代理。
-- 可只针对不可用代理进行复测，便于恢复临时网络失败的代理。
-- 可只针对未检测代理进行补测，减少对已知可用代理的重复请求。
-- 后端检测接口支持 `scope` 和 `scheme` 参数，例如 `POST /api/proxies/check-all?scope=unavailable&scheme=socks5`。
-- 自动检测任务支持在设置页管理启停、间隔、范围和协议类型，系统概览页会展示上次/下次运行和最近结果。
-
-### 多健康地址和协议标签
-
-- 可用性检测地址从单个输入改为国内/海外两组多行配置。
-- 国内检测默认使用 `http://117.72.157.151:8880/`。
-- 海外检测默认包含：
-  - `https://www.gstatic.com/generate_204`
-  - `https://www.cloudflare.com/cdn-cgi/trace`
-  - `https://httpbin.org/status/204`
-- 检测时会跳过无效行和注释行，按国内/海外两组分别判断线路可达性。
-- 代理记录新增 `tags` 字段，用于描述同一 endpoint 可能支持的协议能力。
-- 新增协议标签列，代理池列表会显示 `http`、`https`、`socks5` 标签。
-- 免费代理源和自定义抓取模板支持多协议默认标签，例如 `http,socks5`。旧的 `auto/all` 仍可用，并等价于 `http,https,socks5`。
-- 自定义抓取 UI 的默认协议从单选改为多选标签，适合只有 `IP:端口`、无法提前确认协议类型的代理网站。
-
-### 国内/海外线路标签
-
-- 新增代理线路标签 `reachability`，保存到 SQLite 和接口返回中。
-- 后端检测会同时请求国内检测地址和海外检测地址，自动区分仅国内可用、仅海外可用、双向可用和均不可用。
-- 国内检测地址默认配置为 `http://117.72.157.151:8880/`，可在设置页手动调整。
-- 线路检测不校验返回 IP 是否等于代理地址，只判断检测地址是否可达；返回 IP 可作为人工观察出口 IP 的参考。
-- 代理池页面新增“线路”列和线路筛选。
-- 对外服务新增线路筛选配置，代理轮询和 `/api/proxies/next` 会按线路筛选候选代理。
-
-### 列表分页和字段说明
-
-- 代理池列表新增服务端分页，支持每页 `10`、`20`、`50`、`100` 条。
-- 采集源质量统计新增服务端分页，支持每页 `10`、`20`、`50`、`100` 条。
-- 自定义抓取模板列表新增服务端分页，支持每页 `10`、`20`、`50`、`100` 条。
-- 分页接口统一返回 `items`、`page`、`page_size`、`total`、`total_pages`。
-- 旧接口调用不带 `page` 或 `page_size` 时仍返回数组，兼容已有脚本。
-- 自定义抓取页面新增“字段说明”折叠区，解释 URL 模板、分页模式、并发、重试、停止阈值、正则分组、请求头、请求体、抓取出口等配置用途。
-
-### 质量评分、出口策略和系统概览
-
-- 代理列表新增“质量”列，实时显示 `0-100` 分质量分。
-- `/api/stats` 新增平均质量分和高质量代理数量。
-- 对外服务设置新增出口选择策略：质量优先、质量加权随机、低延迟优先、最近最少使用、按目标粘性。
-- HTTP/HTTPS 代理入口、SOCKS5 代理入口和 `/api/proxies/next` 统一使用新的策略选择器。
-- `/api/proxies/next` 支持 `strategy` 和 `target` 参数，便于按目标地址使用粘性出口。
-- 新增“系统概览”页面，展示代理质量、出口请求量、任务状态、调度状态、维护状态和数据文件大小。
-- 新增 `/api/status`，用于返回系统概览数据。
-
-### 数据维护和定时采集
-
-- 新增数据维护后台循环，可按配置定时执行日志裁剪、来源统计清理、数据库备份、SQLite `VACUUM` 和不可用代理清理。
-- 新增手动维护接口 `POST /api/maintenance/run`，系统概览页可直接触发。
-- 新增定时采集后台循环，可按间隔运行免费代理源采集和已启用的自定义抓取模板。
-- 定时采集支持每日最大运行次数和失败后暂停，避免异常来源持续重试。
-- 新增维护和调度配置项，并同步写入 `config.json`、`configs/config.example.json` 和 SQLite settings。
-
-### 本地离线和自环处理
-
-- 本地示例源可用于离线验证采集和自定义抓取流程。
-- 采集请求访问 `localhost`、`127.0.0.1`、`::1` 目标时会自动绕过代理池和指定代理，避免本机代理入口自环导致 `EOF`。
-- 前端静态资源版本和 service worker 缓存版本已随功能更新递增，保证离线缓存能刷新到新版页面。
-
-### 产品体验优化
-
-- 新增“任务中心”页，统一展示检测、采集、定时采集和维护任务状态。
-- 代理池列表新增“详情”操作，抽屉中展示质量分构成和代理运行信息。
-- 免费代理采集页新增来源表格编辑器，支持新增、删除、上移、下移和原始文本互相同步。
-- 自定义抓取“测试提取”支持未保存模板草稿预览，不再为了测试自动写入模板列表。
-
-### 已执行验证
-
-- 执行 `go test ./...` 验证 Go 单元测试。
-- 执行 `node --check .\internal\proxypool\webui\app.js` 验证前端脚本语法。
-- 执行 `go build -buildvcs=false -o .\bin\proxypool.exe .\cmd\proxypool` 重新构建嵌入式 UI 的本地可执行文件。
-- 执行 `.\scripts\build.ps1` 重新生成 Windows/Linux amd64 发布产物。
-- 使用临时端口验证登录、`/api/status` 系统概览接口和 `POST /api/maintenance/run` 手动维护接口。
-- 使用临时端口验证自定义抓取任务日志返回、响应预览显示、运行中停止任务、停止后状态变为 `stopped`。
-- 使用临时端口验证空代理列表返回 `[]`、清理不可用后前端安全刷新、批量检测 `scope=unavailable`、自定义抓取超时/并发/重试配置保存和运行日志生效。
-- 使用临时本地接口验证自定义请求方法、请求头、请求体、`{page}` 替换和正则提取流程。
+历史功能演进的详细记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 主要 API
 
@@ -559,6 +436,11 @@ GET  /api/collector/sources
 GET  /api/collector/sources?page=1&page_size=20
 DELETE /api/collector/sources
 DELETE /api/collector/sources?url=SOURCE_URL
+GET  /api/dead-proxies
+GET  /api/dead-proxies?q=host&disabled=false
+PATCH /api/dead-proxies/{id}
+DELETE /api/dead-proxies/{id}
+DELETE /api/dead-proxies
 GET  /api/custom-scrapers
 GET  /api/custom-scrapers?page=1&page_size=20
 POST /api/custom-scrapers
@@ -595,7 +477,7 @@ go build -buildvcs=false -o .\bin\proxypool.exe .\cmd\proxypool
 go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.27.0
 ```
 
-发布 Windows/Linux amd64：
+本地脚本发布全平台（Windows/Linux/macOS × amd64/arm64，共 6 个目标）：
 
 ```powershell
 .\scripts\build.ps1
@@ -607,21 +489,13 @@ Linux/macOS shell：
 sh ./scripts/build.sh
 ```
 
-发布产物：
+发布产物为压缩包（内含可执行文件、`README.md` 和 `configs/config.example.json`），并生成 `SHA256SUMS.txt` 校验文件：
 
-- `dist/proxypool-windows-amd64.exe`
-- `dist/proxypool-linux-amd64`
+- `dist/proxypool-windows-amd64.zip`
+- `dist/proxypool-windows-arm64.zip`
+- `dist/proxypool-linux-amd64.tar.gz`
+- `dist/proxypool-linux-arm64.tar.gz`
+- `dist/proxypool-darwin-amd64.tar.gz`
+- `dist/proxypool-darwin-arm64.tar.gz`
 
-当前已验证：
-
-- 单元测试通过
-- 构建通过
-- Windows amd64 与 Linux amd64 发布构建通过
-- Web 静态资源可访问
-- 登录接口正常
-- 文件上传导入正常
-- 自定义抓取模板保存和本地离线预览正常
-- 日志接口正常
-- 系统概览接口正常
-- 手动数据维护接口正常
-- Windows amd64 与 Linux amd64 发布构建通过
+也可以通过 GitHub Actions 手动触发发布（Actions → Release → Run workflow，填写 tag 如 `v1.0.0`），CI 会运行测试、构建 Windows/Linux amd64 产物并创建 Release。
