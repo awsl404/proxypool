@@ -1,0 +1,13 @@
+version: "2"
+sql:
+  - engine: "sqlite"
+    schema: "internal/proxypool/storage/schema.sql"
+    queries: "internal/proxypool/storage/queries"
+    gen:
+      go:
+        package: "storage"
+        out: "internal/proxypool/storage"
+        sql_package: "database/sql"
+        emit_json_tags: true
+        emit_empty_slices: true
+

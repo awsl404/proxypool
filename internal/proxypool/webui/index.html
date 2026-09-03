@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>代理池控制台</title>
+  <link rel="manifest" href="/manifest.webmanifest?v=20260701-34">
+  <link rel="stylesheet" href="/styles.css?v=20260701-34">
+</head>
+<body>
+  <div id="loginView" class="login-page" hidden>
+    <section class="login-panel">
+      <div class="brand-mark">PP</div>
+      <h1>代理池控制台</h1>
+      <p>登录后管理代理导入、采集、检测和对外服务策略。</p>
+      <label>用户名<input id="loginUser" autocomplete="off"></label>
+      <label>密码<input id="loginPass" type="password" autocomplete="off"></label>
+      <button id="loginBtn" class="primary full">登录</button>
+      <div id="loginMsg" class="message error"></div>
+    </section>
+  </div>
+
+  <div id="appView" class="app-shell" hidden>
+    <aside class="sidebar">
+      <div class="side-brand">
+        <div class="brand-mark">PP</div>
+        <div>
+          <strong>代理池</strong>
+          <span>Proxy Pool</span>
+        </div>
+      </div>
+      <nav class="nav">
+        <button class="active" data-tab="pool">代理池</button>
+        <button data-tab="status">系统概览</button>
+        <button data-tab="tasks">任务中心</button>
+        <button data-tab="import">批量导入</button>
+        <button data-tab="collector">免费代理采集</button>
+        <button data-tab="dead">失效档案</button>
+        <button data-tab="custom">自定义抓取</button>
+        <button data-tab="settings">设置</button>
+        <button data-tab="logs">日志</button>
+      </nav>
+      <div class="side-footer">
+        <span>HTTP 入口</span>
+        <strong id="sideHttp">127.0.0.1:18080</strong>
+        <span>SOCKS5 入口</span>
+        <strong id="sideSocks">127.0.0.1:18081</strong>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1 id="pageTitle">代理池</h1>
+          <p id="pageSub">查看代理状态、匿名性、延迟和来源。</p>
+        </div>
+        <div class="top-actions">
+          <button id="refreshBtn" class="secondary">刷新</button>
+          <button id="logoutBtn" class="ghost">退出</button>
+        </div>
+      </header>
+
+      <section class="metrics">
+        <article><span>总数</span><strong id="stTotal">0</strong></article>
+        <article><span>可用</span><strong id="stAvail">0</strong></article>
+        <article><span>不可用</span><strong id="stBad">0</strong></article>
+        <article><span>匿名</span><strong id="stAnon">0</strong></article>
+        <article><span>透明</span><strong id="stTrans">0</strong></article>
+        <article><span>未知</span><strong id="stUnknown">0</strong></article>
+        <article><span>平均延迟</span><strong id="stDelay">0ms</strong></article>
+        <article><span>平均质量</span><strong id="stScore">0</strong></article>
+        <article><span>高质量</span><strong id="stHigh">0</strong></article>
+      </section>
+
+      <section id="tab-status" class="view" hidden>
+        <div class="section-head">
+          <h2>系统概览</h2>
+          <p>查看代理质量、出口请求、后台任务、调度和数据维护状态。</p>
+        </div>
+        <div id="statusCards" class="status-grid"></div>
+        <div class="action-row">
+          <button id="refreshStatusBtn" class="secondary">刷新概览</button>
+          <button id="runMaintenanceBtn" class="primary">立即执行维护</button>
+        </div>
+        <pre id="statusMsg" class="result"></pre>
+      </section>
+
+      <section id="tab-tasks" class="view" hidden>
+        <div class="section-head">
+          <h2>任务中心</h2>
+          <p>集中查看检测、采集、自定义抓取、定时采集和数据维护任务。</p>
+        </div>
+        <div id="taskCards" class="status-grid"></div>
+        <div class="action-row">
+          <button id="refreshTasksBtn" class="secondary">刷新任务</button>
+        </div>
+        <div class="table-wrap task-table">
+          <table>
+            <thead><tr><th>任务</th><th>状态</th><th>开始时间</th><th>完成时间</th><th>结果</th><th>操作</th></tr></thead>
+            <tbody id="taskRows"></tbody>
+          </table>
+        </div>
+        <pre id="taskMsg" class="result task-result"></pre>
+      </section>
+
+      <section id="tab-pool" class="view">
+        <div class="toolbar">
+          <input id="q" class="search" placeholder="搜索主机、账号或来源">
+          <select id="scheme"><option value="">全部协议</option><option>http</option><option>https</option><option>socks5</option></select>
+          <select id="status"><option value="">全部状态</option><option value="available">可用</option><option value="unchecked">未检测</option><option value="unavailable">不可用</option></select>
+          <select id="anonymity"><option value="">全部匿名性</option><option value="anonymous">匿名</option><option value="transparent">透明</option><option value="unknown">未知</option></select>
+          <select id="reachability"><option value="">全部线路</option><option value="domestic">国内可用</option><option value="foreign">海外可用</option><option value="both">双向可用</option><option value="unknown">未知</option><option value="none">均不可用</option></select>
+          <select id="targetCapability"><option value="">全部目标</option><option value="http">HTTP 目标</option><option value="https">HTTPS 目标</option><option value="both">HTTP/HTTPS</option><option value="unknown">未知</option><option value="none">均不可达</option></select>
+        </div>
+        <div class="action-row compact">
+          <select id="checkScope"><option value="all">检测全部启用代理</option><option value="unavailable">仅检测不可用</option><option value="unchecked">仅检测未检测</option><option value="available">仅检测可用</option></select>
+          <select id="checkScheme"><option value="">全部协议</option><option value="http">HTTP</option><option value="https">HTTPS</option><option value="socks5">SOCKS5</option></select>
+          <button id="checkAllBtn" class="secondary">后台检测</button>
+          <button id="cleanupBtn" class="secondary">清理不可用/禁用</button>
+          <button id="deleteFilteredBtn" class="danger">删除当前筛选</button>
+          <button id="exportBtn" class="secondary">导出当前筛选</button>
+        </div>
+        <pre id="proxyMsg" class="result"></pre>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>序号</th><th>代理</th><th>协议标签</th><th>质量</th><th>状态</th><th>匿名性</th><th>线路</th><th>目标</th><th>延迟</th><th>失败</th><th>来源</th><th>操作</th></tr></thead>
+            <tbody id="proxyRows"></tbody>
+          </table>
+        </div>
+        <div class="pager">
+          <span id="proxyPageInfo">第 1/1 页，共 0 条</span>
+          <label>每页<select id="proxyPageSize"><option value="10">10</option><option value="20" selected>20</option><option value="50">50</option><option value="100">100</option></select></label>
+          <button id="proxyPrevPage" class="secondary">上一页</button>
+          <button id="proxyNextPage" class="secondary">下一页</button>
+        </div>
+      </section>
+
+      <section id="tab-import" class="view" hidden>
+        <div class="section-head">
+          <h2>批量导入</h2>
+          <p>支持 URI、host:port、账号密码格式和 CSV。</p>
+        </div>
+        <textarea id="importText" class="mono large" placeholder="socks5://user:pass@127.0.0.1:1080&#10;http://127.0.0.1:8080&#10;user:pass@host:port&#10;http,host,port,user,pass"></textarea>
+        <div class="action-row">
+          <input id="importFile" type="file">
+          <button id="sampleImportBtn" class="secondary">载入离线示例</button>
+          <button id="importBtn" class="primary">导入代理</button>
+        </div>
+        <pre id="importMsg" class="result"></pre>
+      </section>
+
+      <section id="tab-dead" class="view" hidden>
+        <div class="section-head">
+          <h2>失效档案</h2>
+          <p>查看达到失败阈值后移出代理池的记录。</p>
+        </div>
+        <div class="action-row compact">
+          <input id="deadQuery" class="search" placeholder="搜索主机、来源或错误">
+          <select id="deadDisabled"><option value="">全部记录</option><option value="false">正在跳过</option><option value="true">已关闭跳过</option></select>
+          <button id="refreshDeadBtn" class="secondary">刷新档案</button>
+          <button id="clearDeadBtn" class="danger">清空档案</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>序号</th><th>代理</th><th>协议标签</th><th>失败次数</th><th>跳过状态</th><th>来源</th><th>最近失败</th><th>最近错误</th><th>操作</th></tr></thead>
+            <tbody id="deadRows"></tbody>
+          </table>
+        </div>
+        <div class="pager">
+          <span id="deadPageInfo">第 1/1 页，共 0 条</span>
+          <label>每页<select id="deadPageSize"><option value="10">10</option><option value="20" selected>20</option><option value="50">50</option><option value="100">100</option></select></label>
+          <button id="deadPrevPage" class="secondary">上一页</button>
+          <button id="deadNextPage" class="secondary">下一页</button>
+        </div>
+      </section>
+
+      <section id="tab-collector" class="view" hidden>
+        <div class="section-head">
+          <h2>免费代理采集</h2>
+          <p>选择采集请求出口，抓取公开列表后自动导入并验证匿名性。</p>
+        </div>
+        <div class="form-grid">
+          <label>采集出口<select id="collectMode"><option value="direct">本机直连</option><option value="pool">通过当前代理池</option><option value="specific">通过指定代理</option></select></label>
+          <label>指定代理<input id="collectProxy" placeholder="socks5://user:pass@host:port"></label>
+        </div>
+        <div class="section-head source-head compact-head">
+          <h2>免费代理源</h2>
+          <p>按协议标签和 URL 管理本次采集来源，原始文本仍可直接编辑。</p>
+        </div>
+        <div class="action-row compact">
+          <button id="addCollectSourceBtn" class="secondary">新增来源</button>
+          <button id="syncCollectSourcesBtn" class="secondary">从文本刷新表格</button>
+        </div>
+        <div class="table-wrap source-editor-wrap">
+          <table>
+            <thead><tr><th>协议标签</th><th>URL</th><th>操作</th></tr></thead>
+            <tbody id="collectSourceRows"></tbody>
+          </table>
+        </div>
+        <details class="raw-sources">
+          <summary>原始文本</summary>
+          <textarea id="collectSources" class="mono sources" placeholder="http|https://example.com/http.txt&#10;socks5|https://example.com/socks5.txt&#10;http,socks5|https://example.com/unknown.txt"></textarea>
+        </details>
+        <div class="action-row">
+          <button id="localSourceBtn" class="secondary">使用本地示例源</button>
+          <label class="inline-check"><input id="collectCheck" type="checkbox" checked> 采集后立即验证</label>
+          <button id="collectBtn" class="primary">开始采集并验证</button>
+          <button id="collectStopBtn" class="danger" hidden>停止当前任务</button>
+        </div>
+        <pre id="collectMsg" class="result task-result"></pre>
+        <div class="section-head source-head">
+          <h2>采集源质量</h2>
+          <p>按来源累计抓取、导入和验证结果，便于淘汰低质量源。</p>
+        </div>
+        <div class="action-row compact">
+          <input id="sourceQuery" class="search" placeholder="搜索来源或最近错误">
+          <select id="sourceFailed"><option value="">全部来源</option><option value="true">仅失败来源</option></select>
+          <button id="refreshSourcesBtn" class="secondary">刷新统计</button>
+          <button id="clearSourcesBtn" class="danger">清空统计</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>来源</th><th>抓取成功</th><th>抓取失败</th><th>累计导入</th><th>重复</th><th>验证</th><th>最近导入</th><th>最近错误</th><th>操作</th></tr></thead>
+            <tbody id="sourceRows"></tbody>
+          </table>
+        </div>
+        <div class="pager">
+          <span id="sourcePageInfo">第 1/1 页，共 0 条</span>
+          <label>每页<select id="sourcePageSize"><option value="10">10</option><option value="20" selected>20</option><option value="50">50</option><option value="100">100</option></select></label>
+          <button id="sourcePrevPage" class="secondary">上一页</button>
+          <button id="sourceNextPage" class="secondary">下一页</button>
+        </div>
+      </section>
+
+      <section id="tab-settings" class="view" hidden>
+        <div class="section-head">
+          <h2>服务设置</h2>
+          <p>端口修改需要重启服务，策略和采集配置保存后立即用于后续请求。</p>
+        </div>
+        <div class="form-grid">
+          <label>管理页面地址<input id="setWeb"></label>
+          <label>HTTP/HTTPS 代理入口<input id="setHTTP"></label>
+          <label>SOCKS5 代理入口<input id="setSOCKS"></label>
+          <label>国内检测地址<textarea id="setDomesticHealth" class="mono short-list" placeholder="每行一个国内检测地址"></textarea></label>
+          <label>海外检测地址<textarea id="setForeignHealth" class="mono short-list" placeholder="每行一个海外检测地址"></textarea></label>
+          <label>匿名性检测地址<input id="setAnonURL"></label>
+          <label>对外服务匿名性筛选<select id="setServeAnon"><option value="any">不限</option><option value="anonymous">仅匿名</option><option value="transparent">仅透明</option><option value="unknown">仅未知</option></select></label>
+          <label>对外服务线路筛选<select id="setServeReach"><option value="any">不限</option><option value="domestic">国内可用</option><option value="foreign">海外可用</option><option value="both">双向可用</option><option value="unknown">未知</option></select></label>
+          <label>出口选择策略<select id="setServeStrategy"><option value="quality">质量优先</option><option value="weighted">质量加权随机</option><option value="latency">低延迟优先</option><option value="round_robin">最近最少使用</option><option value="sticky">按目标粘性</option></select></label>
+          <label>HTTPS 证书校验<select id="setTLSInsecure"><option value="false">严格校验</option><option value="true">忽略证书错误</option></select></label>
+          <label>日志等级<select id="setLogLevel"><option value="debug">debug</option><option value="info">info</option><option value="warn">warn</option><option value="error">error</option><option value="off">off</option></select></label>
+          <label>日志文件<input id="setLogFile" placeholder="logs/proxypool.log"></label>
+          <label>API Token<input id="setToken"></label>
+          <label>代理认证账号<input id="setProxyUser" placeholder="HTTP Basic / SOCKS5 用户名"></label>
+          <label>代理认证密码<input id="setProxyPass" type="password" placeholder="HTTP Basic / SOCKS5 密码"></label>
+          <label>管理员账号<input id="setUser"></label>
+          <label>新管理员密码<input id="setPass" type="password" placeholder="留空则不修改"></label>
+          <label>默认采集出口<select id="setCollectMode"><option value="direct">本机直连</option><option value="pool">通过当前代理池</option><option value="specific">通过指定代理</option></select></label>
+          <label>默认指定代理<input id="setCollectProxy" placeholder="socks5://user:pass@host:port"></label>
+        </div>
+        <div class="section-head source-head">
+          <h2>代理池检测任务</h2>
+          <p>按固定间隔自动检测指定范围和协议类型的代理池，也可在代理池页手动触发。</p>
+        </div>
+        <div class="form-grid">
+          <label>自动检测开关<select id="setCheckScheduleEnabled"><option value="true">启用</option><option value="false">关闭</option></select></label>
+          <label>自动检测间隔<div class="input-pair"><input id="setIntervalValue" type="number" min="1"><select id="setIntervalUnit"><option value="minutes">分钟</option><option value="hours">小时</option><option value="days">天</option><option value="seconds">秒</option></select></div></label>
+          <label>自动检测范围<select id="setCheckScheduleScope"><option value="all">全部启用代理</option><option value="unavailable">仅不可用</option><option value="unchecked">仅未检测</option><option value="available">仅可用</option></select></label>
+          <label>自动检测协议<select id="setCheckScheduleSchemes"><option value="">全部协议</option><option value="http">HTTP</option><option value="https">HTTPS</option><option value="socks5">SOCKS5</option></select></label>
+          <label>检测并发数<input id="setConcurrency" type="number" min="1"></label>
+          <label>失败删除阈值<input id="setFail" type="number" min="1"></label>
+          <label>请求超时秒数<input id="setTimeout" type="number" min="1"></label>
+        </div>
+        <div class="section-head source-head">
+          <h2>数据维护</h2>
+          <p>定期清理低价值数据、裁剪日志、备份数据库并压缩 SQLite 文件。</p>
+        </div>
+        <div class="form-grid">
+          <label>维护开关<select id="setMaintenanceEnabled"><option value="true">启用</option><option value="false">关闭</option></select></label>
+          <label>维护间隔秒数<input id="setMaintenanceInterval" type="number" min="60"></label>
+          <label>日志保留天数<input id="setLogRetention" type="number" min="0" placeholder="0 不裁剪"></label>
+          <label>来源统计保留天数<input id="setSourceRetention" type="number" min="0" placeholder="0 不清理"></label>
+          <label>备份目录<input id="setBackupDir" placeholder="data/backups"></label>
+          <label>自动备份<select id="setAutoBackup"><option value="false">关闭</option><option value="true">启用</option></select></label>
+          <label>自动压缩数据库<select id="setAutoVacuum"><option value="true">启用</option><option value="false">关闭</option></select></label>
+          <label>自动清理不可用代理<select id="setAutoCleanup"><option value="false">关闭</option><option value="true">启用</option></select></label>
+        </div>
+        <div class="section-head source-head">
+          <h2>定时采集</h2>
+          <p>按间隔自动运行免费代理采集和已启用的自定义抓取模板。</p>
+        </div>
+        <div class="form-grid">
+          <label>调度开关<select id="setScheduleEnabled"><option value="false">关闭</option><option value="true">启用</option></select></label>
+          <label>调度间隔分钟<input id="setScheduleInterval" type="number" min="1"></label>
+          <label>运行免费源<select id="setScheduleCollector"><option value="true">运行</option><option value="false">不运行</option></select></label>
+          <label>运行自定义模板<select id="setScheduleCustom"><option value="false">不运行</option><option value="true">运行</option></select></label>
+          <label>采集后验证<select id="setScheduleCheck"><option value="true">验证</option><option value="false">不验证</option></select></label>
+          <label>每日最多运行次数<input id="setScheduleMaxRuns" type="number" min="1"></label>
+          <label>失败后暂停分钟<input id="setSchedulePause" type="number" min="0" placeholder="0 不暂停"></label>
+        </div>
+        <label class="block-label">默认免费代理源</label>
+        <textarea id="setCollectSources" class="mono sources" placeholder="http|https://example.com/http.txt&#10;socks5|https://example.com/socks5.txt&#10;http,socks5|https://example.com/unknown.txt"></textarea>
+        <div class="section-head source-head">
+          <h2>访问控制</h2>
+          <p>支持 IP、CIDR、主机名，多个值可用换行、空格、逗号或分号分隔；黑名单优先，白名单为空表示不限制。</p>
+        </div>
+        <div class="form-grid">
+          <label>管理入口白名单<textarea id="setWebAllowlist" class="mono short-list" placeholder="例如 127.0.0.1&#10;192.168.1.0/24"></textarea></label>
+          <label>管理入口黑名单<textarea id="setWebBlocklist" class="mono short-list" placeholder="例如 203.0.113.10"></textarea></label>
+          <label>代理入口白名单<textarea id="setProxyAllowlist" class="mono short-list" placeholder="限制可连接 HTTP/SOCKS 代理端口的客户端"></textarea></label>
+          <label>代理入口黑名单<textarea id="setProxyBlocklist" class="mono short-list" placeholder="禁止连接 HTTP/SOCKS 代理端口的客户端"></textarea></label>
+        </div>
+        <label class="check-line"><input id="setLocal" type="checkbox"> 仅监听本机</label>
+        <div class="action-row"><button id="saveSettingsBtn" class="primary">保存设置</button></div>
+        <pre id="settingsMsg" class="result"></pre>
+      </section>
+
+      <section id="tab-custom" class="view" hidden>
+        <div class="section-head">
+          <h2>自定义抓取</h2>
+          <p>为不同代理网站配置 URL 页码模板和正则提取规则，统一管理和运行。</p>
+        </div>
+        <div class="custom-workbench">
+          <aside class="custom-template-panel" aria-label="自定义模板">
+            <div class="custom-panel-head">
+              <div>
+                <h3>已保存模板</h3>
+                <p id="customPageInfo">第 1/1 页，共 0 条</p>
+              </div>
+            </div>
+            <div id="customRows" class="custom-template-list" role="list"></div>
+            <div class="pager custom-pager">
+              <label>每页<select id="customPageSize"><option value="10">10</option><option value="20" selected>20</option><option value="50">50</option><option value="100">100</option></select></label>
+              <button id="customPrevPage" class="secondary">上一页</button>
+              <button id="customNextPage" class="secondary">下一页</button>
+            </div>
+          </aside>
+
+          <section id="customEditor" class="custom-editor-panel" aria-label="模板编辑">
+            <div class="custom-editor-head">
+              <div class="custom-current">
+                <span>当前模板</span>
+                <h3 id="customCurrentName">新建模板</h3>
+                <p id="customCurrentMeta">未保存</p>
+              </div>
+              <div class="custom-editor-actions">
+                <button id="customNewBtn" class="secondary">新建</button>
+                <button id="customSampleBtn" class="secondary">载入示例</button>
+                <button id="customSaveBtn" class="primary">保存模板</button>
+                <button id="customPreviewBtn" class="secondary">测试提取</button>
+                <button id="customRunBtn" class="primary">运行抓取</button>
+                <button id="customStopBtn" class="danger" hidden>停止当前任务</button>
+              </div>
+            </div>
+
+            <div class="custom-subtabs" role="tablist" aria-label="自定义模板配置">
+              <button class="active" role="tab" aria-selected="true" data-custom-section="basic">基础配置</button>
+              <button role="tab" aria-selected="false" data-custom-section="pages">分页策略</button>
+              <button role="tab" aria-selected="false" data-custom-section="extract">提取规则</button>
+              <button role="tab" aria-selected="false" data-custom-section="request">请求设置</button>
+              <button role="tab" aria-selected="false" data-custom-section="result">运行结果</button>
+            </div>
+
+            <div class="custom-tab-panel" data-custom-panel="basic">
+              <div class="form-grid">
+                <label>模板 ID<input id="customId" readonly placeholder="新建时为空"></label>
+                <label>名称<input id="customName" placeholder="例如 proxy.scdn.io"></label>
+                <label>URL 模板<input id="customURL" placeholder="https://example.com/list?per_page={size}&page={page}"></label>
+                <label>启用<select id="customEnabled"><option value="true">启用</option><option value="false">禁用</option></select></label>
+                <div class="field-block">
+                  <span>默认协议标签</span>
+                  <div class="chip-group" aria-label="默认协议标签">
+                    <label class="chip-check"><input type="checkbox" value="http" data-custom-scheme checked><span>HTTP</span></label>
+                    <label class="chip-check"><input type="checkbox" value="https" data-custom-scheme><span>HTTPS</span></label>
+                    <label class="chip-check"><input type="checkbox" value="socks5" data-custom-scheme><span>SOCKS5</span></label>
+                  </div>
+                </div>
+              </div>
+              <label class="block-label">备注</label>
+              <textarea id="customNotes"></textarea>
+            </div>
+
+            <div class="custom-tab-panel" data-custom-panel="pages" hidden>
+              <div class="form-grid">
+                <label>页码模式<select id="customPageMode"><option value="range">固定范围</option><option value="auto">全部页自动识别</option></select></label>
+                <label>起始页<input id="customPageStart" type="number" min="1" value="1"></label>
+                <label>结束页<input id="customPageEnd" type="number" min="1" value="1"></label>
+                <label>每页数量 <input id="customPageSizeParam" type="number" min="0" value="" placeholder="可空，对应 {size}"></label>
+                <label>最多页数<input id="customMaxPages" type="number" min="1" value="50"></label>
+                <label>并发页数<input id="customConcurrency" type="number" min="1" max="50" value="1"></label>
+                <label>失败重试次数<input id="customRetry" type="number" min="0" max="10" value="0"></label>
+                <label>失败自动停止<input id="customStopFailures" type="number" min="0" value="0" placeholder="0 不自动停止"></label>
+                <label>页数识别分组<input id="customPageGroup" placeholder="page 或 1"></label>
+              </div>
+              <label class="block-label">页数识别正则</label>
+              <textarea id="customPagePattern" class="mono custom-code-area" placeholder="(?:page=|/page/)(?P<page>\d+)"></textarea>
+            </div>
+
+            <div class="custom-tab-panel" data-custom-panel="extract" hidden>
+              <label class="block-label first">提取正则</label>
+              <textarea id="customPattern" class="mono custom-code-area large" placeholder="(?:(?P<scheme>https?|socks5)://)?(?:(?P<user>[^:@\s/]+)(?::(?P<password>[^@\s/]*))?@)?(?P<host>(?:\d{1,3}\.){3}\d{1,3}|[A-Za-z0-9.-]+)\s*[:：]\s*(?P<port>\d{2,5})"></textarea>
+              <div class="form-grid">
+                <label>scheme 分组<input id="customSchemeGroup" placeholder="可空，默认用默认协议"></label>
+                <label>host 分组<input id="customHostGroup" value="host"></label>
+                <label>port 分组<input id="customPortGroup" value="port"></label>
+                <label>user 分组<input id="customUserGroup" placeholder="可空"></label>
+                <label>password 分组<input id="customPassGroup" placeholder="可空"></label>
+              </div>
+            </div>
+
+            <div class="custom-tab-panel" data-custom-panel="request" hidden>
+              <div class="form-grid">
+                <label>请求方法<select id="customMethod"><option value="GET">GET</option><option value="POST">POST</option></select></label>
+                <label>请求超时秒数<input id="customTimeout" type="number" min="0" value="0" placeholder="0 使用全局设置"></label>
+                <label>抓取出口<select id="customMode"><option value="direct">本机直连</option><option value="pool">通过当前代理池</option><option value="specific">通过指定代理</option></select></label>
+                <label>指定代理<input id="customProxy" placeholder="socks5://user:pass@host:port"></label>
+                <label class="inline-check"><input id="customCheck" type="checkbox" checked> 导入后立即验证</label>
+              </div>
+              <label class="block-label">请求头</label>
+              <textarea id="customHeaders" class="mono custom-code-area" placeholder="Content-Type: application/json&#10;Authorization: Bearer token"></textarea>
+              <label class="block-label">请求体</label>
+              <textarea id="customBody" class="mono custom-code-area" placeholder="{&quot;page&quot;:{page},&quot;limit&quot;:{size}}"></textarea>
+            </div>
+
+            <div class="custom-tab-panel" data-custom-panel="result" hidden>
+              <pre id="customMsg" class="result task-result custom-result"></pre>
+            </div>
+
+            <details class="field-help custom-field-help">
+              <summary>字段说明</summary>
+              <dl>
+                <dt>模板 ID</dt><dd>已保存模板的数据库 ID，新建时为空。</dd>
+                <dt>名称</dt><dd>用于在模板列表中识别来源站点或规则用途。</dd>
+                <dt>URL 模板</dt><dd>抓取地址，分页时可使用 {page} 和 {size} 占位符。</dd>
+                <dt>请求方法</dt><dd>目标站点要求的 HTTP 方法，支持 GET 和 POST。</dd>
+                <dt>默认协议标签</dt><dd>页面只给出 IP:端口时按这些协议展开候选代理。</dd>
+                <dt>页码模式</dt><dd>固定范围按起止页抓取；全部页会先请求起始页并识别最大页。</dd>
+                <dt>起始页/结束页/每页数量/最多页数</dt><dd>控制分页范围；{size} 留空时替换为空，自动识别页数时最多页数用于防止无限抓取。</dd>
+                <dt>请求超时秒数</dt><dd>单个页面请求超时时间，0 表示使用全局请求超时。</dd>
+                <dt>并发页数</dt><dd>同时抓取的页面数量，数值越大对目标站点压力越高。</dd>
+                <dt>失败重试次数</dt><dd>页面请求失败后额外重试次数。</dd>
+                <dt>失败自动停止</dt><dd>页面失败累计达到该值后停止剩余页面，0 表示不自动停止。</dd>
+                <dt>页数识别正则/分组</dt><dd>从起始页响应里提取最大页码，分组可写命名组 page 或数字组 1。</dd>
+                <dt>scheme/host/port/user/password 分组</dt><dd>提取正则中的字段分组名；scheme 为空时使用默认协议标签。</dd>
+                <dt>请求头/请求体</dt><dd>请求头每行一个，格式为 Header: value；POST 请求体支持 {page} 和 {size} 占位符。</dd>
+                <dt>提取正则</dt><dd>从响应文本中匹配代理，至少需要 host 和 port 分组。</dd>
+                <dt>抓取出口/指定代理</dt><dd>控制抓取目标网站时使用直连、代理池或指定代理。</dd>
+              </dl>
+            </details>
+          </section>
+        </div>
+      </section>
+
+      <section id="tab-logs" class="view" hidden>
+        <div class="section-head">
+          <h2>运行日志</h2>
+          <p>显示最近的本地日志记录，日志等级和文件路径可在设置中调整。</p>
+        </div>
+        <div class="action-row compact">
+          <select id="logLines"><option value="100">最近 100 行</option><option value="200" selected>最近 200 行</option><option value="500">最近 500 行</option></select>
+          <select id="logLevel"><option value="">全部级别</option><option value="debug">debug</option><option value="info">info</option><option value="warn">warn</option><option value="error">error</option></select>
+          <input id="logQuery" class="search" placeholder="搜索日志关键词">
+          <button id="refreshLogsBtn" class="secondary">刷新日志</button>
+          <button id="clearLogsBtn" class="danger">清空日志</button>
+        </div>
+        <pre id="logOutput" class="result log-output"></pre>
+      </section>
+    </main>
+  </div>
+
+  <div id="proxyDrawerBackdrop" class="drawer-backdrop" hidden></div>
+  <aside id="proxyDrawer" class="drawer" hidden>
+    <div class="drawer-head">
+      <div>
+        <h2>代理详情</h2>
+        <p id="proxyDrawerSub">-</p>
+      </div>
+      <button id="closeProxyDrawerBtn" class="ghost">关闭</button>
+    </div>
+    <div id="proxyDrawerBody" class="drawer-body"></div>
+  </aside>
+
+  <script type="module" src="/app.js?v=20260701-34"></script>
+</body>
+</html>

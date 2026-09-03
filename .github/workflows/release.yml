@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, for example v1.0.0
+        required: true
+        type: string
+      prerelease:
+        description: Mark the release as a prerelease
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test
+        run: go test ./...
+
+      - name: Build binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist release
+
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
+            -trimpath -buildvcs=false -ldflags "-s -w" \
+            -o dist/proxypool-windows-amd64.exe ./cmd/proxypool
+
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+            -trimpath -buildvcs=false -ldflags "-s -w" \
+            -o dist/proxypool-linux-amd64 ./cmd/proxypool
+
+      - name: Package artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp configs/config.example.json dist/config.example.json
+          cp README.md dist/README.md
+
+          zip -j release/proxypool-windows-amd64.zip \
+            dist/proxypool-windows-amd64.exe \
+            dist/config.example.json \
+            dist/README.md
+
+          tar -C dist -czf release/proxypool-linux-amd64.tar.gz \
+            proxypool-linux-amd64 \
+            config.example.json \
+            README.md
+
+          (cd release && sha256sum proxypool-windows-amd64.zip proxypool-linux-amd64.tar.gz > SHA256SUMS.txt)
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          name: ${{ inputs.tag }}
+          prerelease: ${{ inputs.prerelease }}
+          generate_release_notes: true
+          files: |
+            release/proxypool-windows-amd64.zip
+            release/proxypool-linux-amd64.tar.gz
+            release/SHA256SUMS.txt
