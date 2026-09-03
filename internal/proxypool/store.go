@@ -651,6 +651,8 @@ func (s *Store) ensureDefaultSettings(ctx context.Context) error {
 		"fail_threshold":                 strconv.Itoa(def.FailThreshold),
 		"timeout_seconds":                strconv.Itoa(def.TimeoutSeconds),
 		"tls_insecure_skip_verify":       boolString(def.TLSInsecureSkipVerify),
+		"check_success_keywords":         def.CheckSuccessKeywords,
+		"check_block_keywords":           def.CheckBlockKeywords,
 		"maintenance_enabled":            boolString(def.MaintenanceEnabled),
 		"maintenance_interval_seconds":   strconv.Itoa(def.MaintenanceInterval),
 		"log_retention_days":             strconv.Itoa(def.LogRetentionDays),
@@ -749,6 +751,10 @@ func (s *Store) Settings(ctx context.Context) (Settings, error) {
 			cfg.TimeoutSeconds = parsePositive(v, cfg.TimeoutSeconds)
 		case "tls_insecure_skip_verify":
 			cfg.TLSInsecureSkipVerify = parseBoolString(v)
+		case "check_success_keywords":
+			cfg.CheckSuccessKeywords = v
+		case "check_block_keywords":
+			cfg.CheckBlockKeywords = v
 		case "maintenance_enabled":
 			cfg.MaintenanceEnabled = parseBoolString(v)
 		case "maintenance_interval_seconds":
@@ -856,6 +862,8 @@ func (s *Store) UpdateSettings(ctx context.Context, cfg Settings) error {
 		"fail_threshold":                 strconv.Itoa(maxInt(1, cfg.FailThreshold)),
 		"timeout_seconds":                strconv.Itoa(maxInt(1, cfg.TimeoutSeconds)),
 		"tls_insecure_skip_verify":       boolString(cfg.TLSInsecureSkipVerify),
+		"check_success_keywords":         cfg.CheckSuccessKeywords,
+		"check_block_keywords":           cfg.CheckBlockKeywords,
 		"maintenance_enabled":            boolString(cfg.MaintenanceEnabled),
 		"maintenance_interval_seconds":   strconv.Itoa(maxInt(60, cfg.MaintenanceInterval)),
 		"log_retention_days":             strconv.Itoa(maxInt(0, cfg.LogRetentionDays)),

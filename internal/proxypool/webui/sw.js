@@ -1,4 +1,4 @@
-const CACHE_NAME = "proxypool-ui-v34";
+const CACHE_NAME = "proxypool-ui-v35";
 const ASSETS = [
   "/",
   "/index.html",

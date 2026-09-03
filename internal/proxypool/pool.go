@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"io"
 	"math/rand"
 	"net"
@@ -435,12 +436,51 @@ func checkProxyURL(ctx context.Context, p Proxy, cfg Settings, healthURL string)
 	if err != nil {
 		return 0, err
 	}
-	_, _ = io.Copy(io.Discard, resp.Body)
-	_ = resp.Body.Close()
-	if resp.StatusCode >= 200 && resp.StatusCode < 500 {
-		return time.Since(start), nil
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 500 {
+		return 0, errors.New(resp.Status)
 	}
-	return 0, errors.New(resp.Status)
+	body, err := readCheckBody(resp.Body)
+	if err != nil {
+		return 0, err
+	}
+	if err := validateCheckBody(body, checkKeywords(cfg.CheckSuccessKeywords), checkKeywords(cfg.CheckBlockKeywords)); err != nil {
+		return 0, err
+	}
+	return time.Since(start), nil
+}
+
+const checkBodyReadLimit = 256 * 1024
+
+// checkKeywords splits the configured keyword text into lines; empty lines
+// and # comments are ignored.
+func checkKeywords(text string) []string {
+	return splitImportLines(text)
+}
+
+// validateCheckBody applies the configured content signatures to a health
+// check response body. successKeywords must ALL be present; any blockKeyword
+// marks the response as unusable (hijacked portal pages, captive errors...).
+func validateCheckBody(body string, successKeywords, blockKeywords []string) error {
+	for _, keyword := range blockKeywords {
+		if keyword != "" && strings.Contains(body, keyword) {
+			return fmt.Errorf("响应内容命中禁止关键词: %q", keyword)
+		}
+	}
+	for _, keyword := range successKeywords {
+		if keyword != "" && !strings.Contains(body, keyword) {
+			return fmt.Errorf("响应内容缺少必需关键词: %q", keyword)
+		}
+	}
+	return nil
+}
+
+func readCheckBody(r io.Reader) (string, error) {
+	data, err := io.ReadAll(io.LimitReader(r, checkBodyReadLimit))
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 func checkHTTPProxyURL(ctx context.Context, p Proxy, cfg Settings, healthURL string) (time.Duration, error) {
@@ -464,11 +504,17 @@ func checkHTTPProxyURL(ctx context.Context, p Proxy, cfg Settings, healthURL str
 		return 0, err
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
-	if resp.StatusCode >= 200 && resp.StatusCode < 500 {
-		return time.Since(start), nil
+	if resp.StatusCode < 200 || resp.StatusCode >= 500 {
+		return 0, errors.New(resp.Status)
 	}
-	return 0, errors.New(resp.Status)
+	body, err := readCheckBody(resp.Body)
+	if err != nil {
+		return 0, err
+	}
+	if err := validateCheckBody(body, checkKeywords(cfg.CheckSuccessKeywords), checkKeywords(cfg.CheckBlockKeywords)); err != nil {
+		return 0, err
+	}
+	return time.Since(start), nil
 }
 
 func tlsConfig(cfg Settings) *tls.Config {

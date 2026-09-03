@@ -700,6 +700,8 @@ async function loadSettings() {
   $("setFail").value = c.fail_threshold;
   $("setTimeout").value = c.timeout_seconds;
   $("setTLSInsecure").value = String(c.tls_insecure_skip_verify === true);
+  $("setCheckSuccessKeywords").value = c.check_success_keywords || "";
+  $("setCheckBlockKeywords").value = c.check_block_keywords || "";
   $("setLogLevel").value = c.log_level;
   $("setLogFile").value = c.log_file;
   $("setToken").value = c.api_token;
@@ -1589,6 +1591,8 @@ async function saveSettings() {
     fail_threshold: Number($("setFail").value),
     timeout_seconds: Number($("setTimeout").value),
     tls_insecure_skip_verify: $("setTLSInsecure").value === "true",
+    check_success_keywords: $("setCheckSuccessKeywords").value,
+    check_block_keywords: $("setCheckBlockKeywords").value,
     api_token: $("setToken").value,
     proxy_username: $("setProxyUser").value,
     proxy_password: $("setProxyPass").value,

@@ -58,6 +58,8 @@ type Settings struct {
 	FailThreshold         int    `json:"fail_threshold"`
 	TimeoutSeconds        int    `json:"timeout_seconds"`
 	TLSInsecureSkipVerify bool   `json:"tls_insecure_skip_verify"`
+	CheckSuccessKeywords  string `json:"check_success_keywords"`
+	CheckBlockKeywords    string `json:"check_block_keywords"`
 	MaintenanceEnabled    bool   `json:"maintenance_enabled"`
 	MaintenanceInterval   int    `json:"maintenance_interval_seconds"`
 	LogRetentionDays      int    `json:"log_retention_days"`

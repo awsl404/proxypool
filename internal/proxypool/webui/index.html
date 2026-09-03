@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>代理池控制台</title>
-  <link rel="manifest" href="/manifest.webmanifest?v=20260701-34">
-  <link rel="stylesheet" href="/styles.css?v=20260701-34">
+  <link rel="manifest" href="/manifest.webmanifest?v=20260903-35">
+  <link rel="stylesheet" href="/styles.css?v=20260903-35">
 </head>
 <body>
   <div id="loginView" class="login-page" hidden>
@@ -270,6 +270,8 @@
           <label>检测并发数<input id="setConcurrency" type="number" min="1"></label>
           <label>失败删除阈值<input id="setFail" type="number" min="1"></label>
           <label>请求超时秒数<input id="setTimeout" type="number" min="1"></label>
+          <label>必须命中关键词<textarea id="setCheckSuccessKeywords" class="mono short-list" placeholder="每行一个，响应需全部包含才算可用，留空不校验&#10;例如 httpbin.org/get 检测源返回的 origin 字段名"></textarea></label>
+          <label>禁止命中关键词<textarea id="setCheckBlockKeywords" class="mono short-list" placeholder="每行一个，响应包含任一个即判不可用&#10;例如劫持页常见的 请登录、流量已用尽 等特征词"></textarea></label>
         </div>
         <div class="section-head source-head">
           <h2>数据维护</h2>
@@ -480,6 +482,6 @@
     <div id="proxyDrawerBody" class="drawer-body"></div>
   </aside>
 
-  <script type="module" src="/app.js?v=20260701-34"></script>
+  <script type="module" src="/app.js?v=20260903-35"></script>
 </body>
 </html>

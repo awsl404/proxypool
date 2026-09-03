@@ -22,6 +22,8 @@
   "check_schedule_schemes": "",
   "fail_threshold": 3,
   "timeout_seconds": 8,
+  "check_success_keywords": "",
+  "check_block_keywords": "",
   "maintenance_enabled": true,
   "maintenance_interval_seconds": 3600,
   "log_retention_days": 7,
