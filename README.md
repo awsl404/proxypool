@@ -278,14 +278,62 @@ UI 新增“系统概览”页，用于查看运行状态：
 - HTTP/HTTPS CONNECT：`127.0.0.1:18080`
 - SOCKS5：`127.0.0.1:18081`
 
-同时提供代理分发 API：
+#### 快速使用：作为代理出口
+
+默认 `bind_local_only=true` 且客户端在本机时，两个入口**无需认证**，直接当普通代理用：
+
+```bash
+# HTTP/HTTPS 代理入口（支持 CONNECT 隧道，HTTPS 同样适用）
+curl -x http://127.0.0.1:18080 https://httpbin.org/ip
+
+# SOCKS5 代理入口（socks5h 表示域名解析也走代理）
+curl -x socks5h://127.0.0.1:18081 https://httpbin.org/ip
+
+# 给终端会话全局挂上代理
+export http_proxy=http://127.0.0.1:18080
+export https_proxy=http://127.0.0.1:18080
+export all_proxy=socks5h://127.0.0.1:18081
+```
+
+关闭“仅监听本机”（`bind_local_only=false`）允许远程访问后，入口需要认证，两种方式任选其一：
+
+```bash
+# 方式一：API Token（设置页可见）
+#   HTTP 入口用 Bearer 头
+curl -x http://SERVER_IP:18080 -H "Proxy-Authorization: Bearer API_TOKEN" https://httpbin.org/ip
+#   SOCKS5 入口把 Token 填在用户名或密码都行
+curl -x socks5h://API_TOKEN@SERVER_IP:18081 https://httpbin.org/ip
+
+# 方式二：代理认证账号（设置页的“代理认证账号/密码”，走标准 Basic / SOCKS5 用户名密码认证）
+curl -x http://proxyuser:proxypass@SERVER_IP:18080 https://httpbin.org/ip
+curl -x socks5h://proxyuser:proxypass@SERVER_IP:18081 https://httpbin.org/ip
+```
+
+#### 快速使用：取单个代理自己用
+
+分发 API 由 API Token 保护，每次调用按出口策略返回一条可用代理（JSON），拿到后自行连接：
+
+```bash
+curl "http://127.0.0.1:8080/api/proxies/next?token=API_TOKEN"
+# 返回示例：{"id":1,"scheme":"socks5","host":"1.2.3.4","port":1080,...}
+
+# 只想要匿名代理 / 海外线路代理
+curl "http://127.0.0.1:8080/api/proxies/next?token=API_TOKEN&anonymity=anonymous"
+curl "http://127.0.0.1:8080/api/proxies/next?token=API_TOKEN&reachability=foreign"
+```
+
+注意：分发 API 返回的是“代理池里上游代理的地址”，你要自己连它；而 18080/18081 入口是“常驻代理”，客户端固定连入口、由代理池在背后轮换上游，无需关心具体代理。
+
+分发 API 完整参数：
 
 ```http
-GET /api/proxies/next?token=API_TOKEN
-GET /api/proxies/next?token=API_TOKEN&anonymity=anonymous
-GET /api/proxies/next?token=API_TOKEN&reachability=foreign
-GET /api/proxies/next?token=API_TOKEN&strategy=sticky&target=example.com:443
+GET /api/proxies/next?token=API_TOKEN&anonymity=anonymous&reachability=foreign&strategy=sticky&target=example.com:443
 ```
+
+- `anonymity`：匿名性筛选（`any` / `anonymous` / `transparent` / `unknown`）
+- `reachability`：线路筛选（`any` / `domestic` / `foreign` / `both` / `unknown`）
+- `strategy`：出口策略（`sequential` / `latency` / `round_robin` / `sticky`）
+- `target`：`strategy=sticky` 时按目标地址保持粘性
 
 ### 配置文件同步
 

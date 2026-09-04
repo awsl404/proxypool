@@ -2,6 +2,12 @@
 
 记录项目的阶段性功能演进和历史操作记录。
 
+## 对外服务使用文档补充
+
+- README「对外服务」章节新增“快速使用”说明：本机直连两个代理入口的 curl 示例和终端环境变量配置。
+- 补充远程访问时的认证方式说明：HTTP 入口支持 `Proxy-Authorization: Bearer API_TOKEN` 或 Basic 认证；SOCKS5 入口支持把 API Token 填在用户名或密码，或使用代理认证账号。
+- 补充分发 API `/api/proxies/next` 的调用示例和完整参数（`anonymity`、`reachability`、`strategy`、`target`）说明，并解释入口代理与分发 API 的使用差异。
+
 ## 出口策略调整：新增依次轮询，移除 IP 质量评分
 
 - 新增出口策略 `依次轮询`（`sequential`）：严格按最近使用时间从早到晚依次分发候选代理，每个代理轮流使用，不做状态、失败次数、延迟筛选；使用后自动排到队尾。
