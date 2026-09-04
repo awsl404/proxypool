@@ -57,7 +57,8 @@ ORDER BY
   CASE status WHEN 'available' THEN 0 ELSE 1 END,
   fail_count ASC,
   CASE WHEN latency_ms = 0 THEN 999999 ELSE latency_ms END ASC,
-  COALESCE(last_used, '1970-01-01T00:00:00Z') ASC
+  COALESCE(last_used, '1970-01-01T00:00:00Z') ASC,
+  id ASC
 LIMIT ?5
 `
 
@@ -687,6 +688,112 @@ func (q *Queries) ProxyStats(ctx context.Context) (ProxyStatsRow, error) {
 		&i.AverageDelay,
 	)
 	return i, err
+}
+
+const sequentialCandidateProxies = `-- name: SequentialCandidateProxies :many
+SELECT
+  id,
+  scheme,
+  host,
+  port,
+  username,
+  password,
+  tags,
+  source,
+  anonymity,
+  reachability,
+  target_capability,
+  enabled,
+  status,
+  fail_count,
+  success_count,
+  latency_ms,
+  last_checked,
+  last_used,
+  created_at,
+  updated_at
+FROM proxies
+WHERE enabled = 1
+  AND status != 'unavailable'
+  AND (
+    ?1 = ''
+    OR instr(',' || ?1 || ',', ',' || scheme || ',') > 0
+  )
+  AND (?2 = '' OR anonymity = ?2)
+  AND (
+    ?3 = ''
+    OR reachability = ?3
+    OR (?3 = 'domestic' AND reachability = 'both')
+    OR (?3 = 'foreign' AND reachability = 'both')
+  )
+  AND (
+    ?4 = ''
+    OR target_capability = ?4
+    OR (?4 = 'http' AND target_capability = 'both')
+    OR (?4 = 'https' AND target_capability = 'both')
+  )
+ORDER BY
+  COALESCE(last_used, '1970-01-01T00:00:00Z') ASC,
+  id ASC
+LIMIT ?5
+`
+
+type SequentialCandidateProxiesParams struct {
+	SchemeFilter           interface{} `json:"scheme_filter"`
+	AnonymityFilter        interface{} `json:"anonymity_filter"`
+	ReachabilityFilter     interface{} `json:"reachability_filter"`
+	TargetCapabilityFilter interface{} `json:"target_capability_filter"`
+	RowLimit               int64       `json:"row_limit"`
+}
+
+func (q *Queries) SequentialCandidateProxies(ctx context.Context, arg SequentialCandidateProxiesParams) ([]Proxy, error) {
+	rows, err := q.db.QueryContext(ctx, sequentialCandidateProxies,
+		arg.SchemeFilter,
+		arg.AnonymityFilter,
+		arg.ReachabilityFilter,
+		arg.TargetCapabilityFilter,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Proxy{}
+	for rows.Next() {
+		var i Proxy
+		if err := rows.Scan(
+			&i.ID,
+			&i.Scheme,
+			&i.Host,
+			&i.Port,
+			&i.Username,
+			&i.Password,
+			&i.Tags,
+			&i.Source,
+			&i.Anonymity,
+			&i.Reachability,
+			&i.TargetCapability,
+			&i.Enabled,
+			&i.Status,
+			&i.FailCount,
+			&i.SuccessCount,
+			&i.LatencyMs,
+			&i.LastChecked,
+			&i.LastUsed,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const setProxyEnabled = `-- name: SetProxyEnabled :exec

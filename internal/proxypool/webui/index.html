@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>代理池控制台</title>
-  <link rel="manifest" href="/manifest.webmanifest?v=20260903-35">
-  <link rel="stylesheet" href="/styles.css?v=20260903-35">
+  <link rel="manifest" href="/manifest.webmanifest?v=20260903-36">
+  <link rel="stylesheet" href="/styles.css?v=20260903-36">
 </head>
 <body>
   <div id="loginView" class="login-page" hidden>
@@ -68,14 +68,12 @@
         <article><span>透明</span><strong id="stTrans">0</strong></article>
         <article><span>未知</span><strong id="stUnknown">0</strong></article>
         <article><span>平均延迟</span><strong id="stDelay">0ms</strong></article>
-        <article><span>平均质量</span><strong id="stScore">0</strong></article>
-        <article><span>高质量</span><strong id="stHigh">0</strong></article>
       </section>
 
       <section id="tab-status" class="view" hidden>
         <div class="section-head">
           <h2>系统概览</h2>
-          <p>查看代理质量、出口请求、后台任务、调度和数据维护状态。</p>
+          <p>查看出口请求、后台任务、调度和数据维护状态。</p>
         </div>
         <div id="statusCards" class="status-grid"></div>
         <div class="action-row">
@@ -123,7 +121,7 @@
         <pre id="proxyMsg" class="result"></pre>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>序号</th><th>代理</th><th>协议标签</th><th>质量</th><th>状态</th><th>匿名性</th><th>线路</th><th>目标</th><th>延迟</th><th>失败</th><th>来源</th><th>操作</th></tr></thead>
+            <thead><tr><th>序号</th><th>代理</th><th>协议标签</th><th>状态</th><th>匿名性</th><th>线路</th><th>目标</th><th>延迟</th><th>失败</th><th>来源</th><th>操作</th></tr></thead>
             <tbody id="proxyRows"></tbody>
           </table>
         </div>
@@ -246,7 +244,7 @@
           <label>匿名性检测地址<input id="setAnonURL"></label>
           <label>对外服务匿名性筛选<select id="setServeAnon"><option value="any">不限</option><option value="anonymous">仅匿名</option><option value="transparent">仅透明</option><option value="unknown">仅未知</option></select></label>
           <label>对外服务线路筛选<select id="setServeReach"><option value="any">不限</option><option value="domestic">国内可用</option><option value="foreign">海外可用</option><option value="both">双向可用</option><option value="unknown">未知</option></select></label>
-          <label>出口选择策略<select id="setServeStrategy"><option value="quality">质量优先</option><option value="weighted">质量加权随机</option><option value="latency">低延迟优先</option><option value="round_robin">最近最少使用</option><option value="sticky">按目标粘性</option></select></label>
+          <label>出口选择策略<select id="setServeStrategy"><option value="sequential">依次轮询</option><option value="latency">低延迟优先</option><option value="round_robin">最近最少使用</option><option value="sticky">按目标粘性</option></select></label>
           <label>HTTPS 证书校验<select id="setTLSInsecure"><option value="false">严格校验</option><option value="true">忽略证书错误</option></select></label>
           <label>日志等级<select id="setLogLevel"><option value="debug">debug</option><option value="info">info</option><option value="warn">warn</option><option value="error">error</option><option value="off">off</option></select></label>
           <label>日志文件<input id="setLogFile" placeholder="logs/proxypool.log"></label>
@@ -482,6 +480,6 @@
     <div id="proxyDrawerBody" class="drawer-body"></div>
   </aside>
 
-  <script type="module" src="/app.js?v=20260903-35"></script>
+  <script type="module" src="/app.js?v=20260903-36"></script>
 </body>
 </html>

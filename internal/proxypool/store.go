@@ -443,7 +443,7 @@ func proxyFromStorage(row storage.Proxy) Proxy {
 	if row.LastUsed.Valid {
 		p.LastUsed = &row.LastUsed.Time
 	}
-	p.QualityScore = proxyQualityScore(p)
+
 	return p
 }
 
@@ -1145,6 +1145,39 @@ func (s *Store) CandidateProxies(ctx context.Context, limit int, anonymity, reac
 	return s.CandidateProxiesForTargetCapability(ctx, limit, anonymity, reachability, schemes, "")
 }
 
+// SequentialCandidateProxies returns candidates strictly ordered by last_used
+// (oldest first), ignoring status/fail/latency bias so every proxy gets its
+// turn in a true sequential rotation.
+func (s *Store) SequentialCandidateProxies(ctx context.Context, limit int, anonymity, reachability, schemes, targetCapability string) ([]Proxy, error) {
+	filter := normalizeAnonymityFilter(anonymity)
+	if filter == "any" {
+		filter = ""
+	}
+	reachabilityFilter := normalizeReachabilityFilter(reachability)
+	if reachabilityFilter == "any" {
+		reachabilityFilter = ""
+	}
+	targetCapabilityFilter := normalizeTargetCapabilityFilter(targetCapability)
+	if targetCapabilityFilter == "any" {
+		targetCapabilityFilter = ""
+	}
+	rows, err := s.queries.SequentialCandidateProxies(ctx, storage.SequentialCandidateProxiesParams{
+		SchemeFilter:           normalizeCandidateSchemeFilter(schemes),
+		AnonymityFilter:        filter,
+		ReachabilityFilter:     reachabilityFilter,
+		TargetCapabilityFilter: targetCapabilityFilter,
+		RowLimit:               int64(limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	var out []Proxy
+	for _, row := range rows {
+		out = append(out, proxyFromStorage(row))
+	}
+	return out, nil
+}
+
 func (s *Store) CandidateProxiesForTargetCapability(ctx context.Context, limit int, anonymity, reachability, schemes, targetCapability string) ([]Proxy, error) {
 	filter := normalizeAnonymityFilter(anonymity)
 	if filter == "any" {
@@ -1262,21 +1295,6 @@ func (s *Store) Stats(ctx context.Context) (Stats, error) {
 		Unknown:      sqlValueInt(row.Unknown),
 		AverageDelay: sqlValueInt(row.AverageDelay),
 	}
-	items, err := s.ListProxiesFiltered(ctx, "", "", "", "", "")
-	if err != nil {
-		return stats, nil
-	}
-	totalScore := 0
-	for _, p := range items {
-		score := proxyQualityScore(p)
-		totalScore += score
-		if score >= 70 {
-			stats.HighQuality++
-		}
-	}
-	if len(items) > 0 {
-		stats.AverageScore = totalScore / len(items)
-	}
 	return stats, nil
 }
 
@@ -1387,7 +1405,7 @@ func scanProxy(row proxyScanner) (Proxy, error) {
 	if lastUsed.Valid {
 		p.LastUsed = &lastUsed.Time
 	}
-	p.QualityScore = proxyQualityScore(p)
+
 	return p, nil
 }
 

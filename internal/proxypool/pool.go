@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
 	"net"
 	"net/http"
 	"net/url"
@@ -107,7 +106,24 @@ func (p *ProxyPool) CandidatesForSchemes(ctx context.Context, target string, cfg
 	if fetchLimit > 300 {
 		fetchLimit = 300
 	}
+	strategy := normalizeServeStrategy(cfg.ServeStrategy)
 	targetCapability := targetCapabilityFromTarget(target)
+	if strategy == "sequential" {
+		candidates, err := p.store.SequentialCandidateProxies(ctx, fetchLimit, cfg.ServeAnonymity, cfg.ServeReachability, schemes, targetCapability)
+		if err != nil {
+			return nil, err
+		}
+		if len(candidates) == 0 && targetCapability != "" {
+			candidates, err = p.store.SequentialCandidateProxies(ctx, fetchLimit, cfg.ServeAnonymity, cfg.ServeReachability, schemes, "unknown")
+			if err != nil {
+				return nil, err
+			}
+		}
+		if len(candidates) > limit {
+			candidates = candidates[:limit]
+		}
+		return candidates, nil
+	}
 	candidates, err := p.store.CandidateProxiesForTargetCapability(ctx, fetchLimit, cfg.ServeAnonymity, cfg.ServeReachability, schemes, targetCapability)
 	if err != nil {
 		return nil, err
@@ -118,7 +134,7 @@ func (p *ProxyPool) CandidatesForSchemes(ctx context.Context, target string, cfg
 			return nil, err
 		}
 	}
-	return orderCandidateProxies(candidates, normalizeServeStrategy(cfg.ServeStrategy), target, limit), nil
+	return orderCandidateProxies(candidates, strategy, target, limit), nil
 }
 
 func (p *ProxyPool) Metrics() PoolMetrics {
@@ -151,12 +167,7 @@ func (p *ProxyPool) recordDial(ok bool, used Proxy, err error) {
 
 func orderCandidateProxies(candidates []Proxy, strategy, target string, limit int) []Proxy {
 	items := append([]Proxy(nil), candidates...)
-	for i := range items {
-		items[i].QualityScore = proxyQualityScore(items[i])
-	}
 	switch strategy {
-	case "weighted":
-		items = weightedCandidateOrder(items, limit)
 	case "latency":
 		sort.SliceStable(items, func(i, j int) bool {
 			if statusRank(items[i]) != statusRank(items[j]) {
@@ -166,9 +177,6 @@ func orderCandidateProxies(candidates []Proxy, strategy, target string, limit in
 			if li != lj {
 				return li < lj
 			}
-			if items[i].QualityScore != items[j].QualityScore {
-				return items[i].QualityScore > items[j].QualityScore
-			}
 			return lastUsedBefore(items[i], items[j])
 		})
 	case "round_robin":
@@ -176,36 +184,21 @@ func orderCandidateProxies(candidates []Proxy, strategy, target string, limit in
 			if statusRank(items[i]) != statusRank(items[j]) {
 				return statusRank(items[i]) < statusRank(items[j])
 			}
-			if lastUsedBefore(items[i], items[j]) != lastUsedBefore(items[j], items[i]) {
-				return lastUsedBefore(items[i], items[j])
-			}
-			return items[i].QualityScore > items[j].QualityScore
+			return lastUsedBefore(items[i], items[j])
 		})
 	case "sticky":
 		if target == "" {
-			return orderCandidateProxies(items, "quality", target, limit)
+			return orderCandidateProxies(items, "round_robin", target, limit)
 		}
 		sort.SliceStable(items, func(i, j int) bool {
 			if statusRank(items[i]) != statusRank(items[j]) {
 				return statusRank(items[i]) < statusRank(items[j])
 			}
-			bi, bj := items[i].QualityScore/10, items[j].QualityScore/10
-			if bi != bj {
-				return bi > bj
-			}
 			return stickyScore(target, items[i].ID) < stickyScore(target, items[j].ID)
 		})
 	default:
+		// sequential：保持 SQL 返回的 last_used 升序，严格依次轮询。
 		sort.SliceStable(items, func(i, j int) bool {
-			if statusRank(items[i]) != statusRank(items[j]) {
-				return statusRank(items[i]) < statusRank(items[j])
-			}
-			if items[i].QualityScore != items[j].QualityScore {
-				return items[i].QualityScore > items[j].QualityScore
-			}
-			if latencyRank(items[i]) != latencyRank(items[j]) {
-				return latencyRank(items[i]) < latencyRank(items[j])
-			}
 			return lastUsedBefore(items[i], items[j])
 		})
 	}
@@ -213,29 +206,6 @@ func orderCandidateProxies(candidates []Proxy, strategy, target string, limit in
 		items = items[:limit]
 	}
 	return items
-}
-
-func weightedCandidateOrder(candidates []Proxy, limit int) []Proxy {
-	pool := append([]Proxy(nil), candidates...)
-	out := make([]Proxy, 0, minInt(limit, len(pool)))
-	for len(pool) > 0 && len(out) < limit {
-		total := 0
-		for _, p := range pool {
-			total += maxInt(1, p.QualityScore)
-		}
-		pick := rand.Intn(total)
-		idx := 0
-		for i, p := range pool {
-			pick -= maxInt(1, p.QualityScore)
-			if pick < 0 {
-				idx = i
-				break
-			}
-		}
-		out = append(out, pool[idx])
-		pool = append(pool[:idx], pool[idx+1:]...)
-	}
-	return out
 }
 
 func statusRank(p Proxy) int {

@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
+
 )
 
 func itoa(v int) string {
@@ -226,82 +226,18 @@ func targetCapabilityFromTarget(target string) string {
 
 func normalizeServeStrategy(v string) string {
 	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "round_robin", "round-robin", "rr":
-		return "round_robin"
-	case "weighted", "weight":
-		return "weighted"
 	case "latency", "fast":
 		return "latency"
 	case "sticky", "target_sticky":
 		return "sticky"
-	case "quality", "score", "balanced":
-		return "quality"
+	case "sequential", "sequence", "in_order":
+		return "sequential"
+	case "round_robin", "round-robin", "rr", "quality", "weighted", "weight", "score", "balanced":
+		// quality/weighted 依赖已删除的 IP 质量评分，旧配置回落到最近最少使用。
+		return "round_robin"
 	default:
-		return "quality"
+		return "round_robin"
 	}
-}
-
-func proxyQualityScore(p Proxy) int {
-	if !p.Enabled {
-		return 0
-	}
-	score := 45
-	switch p.Status {
-	case "available":
-		score += 25
-	case "unchecked":
-		score += 5
-	case "unavailable":
-		score -= 35
-	}
-	attempts := p.SuccessCount + p.FailCount
-	if attempts > 0 {
-		score += int(float64(p.SuccessCount) / float64(attempts) * 20)
-		score -= int(float64(p.FailCount) / float64(attempts) * 12)
-	}
-	score -= p.FailCount * 6
-	if p.LatencyMS > 0 {
-		switch {
-		case p.LatencyMS <= 300:
-			score += 18
-		case p.LatencyMS <= 800:
-			score += 12
-		case p.LatencyMS <= 1500:
-			score += 6
-		case p.LatencyMS > 4000:
-			score -= 10
-		}
-	}
-	switch normalizeAnonymity(p.Anonymity) {
-	case "anonymous":
-		score += 5
-	case "transparent":
-		score -= 5
-	}
-	switch normalizeReachability(p.Reachability) {
-	case "both":
-		score += 8
-	case "domestic", "foreign":
-		score += 4
-	case "none":
-		score -= 25
-	}
-	switch normalizeTargetCapability(p.TargetCapability) {
-	case "both":
-		score += 8
-	case "https":
-		score += 5
-	case "http":
-		score += 3
-	case "none":
-		score -= 25
-	}
-	if p.LastChecked == nil {
-		score -= 3
-	} else if time.Since(*p.LastChecked) > 24*time.Hour {
-		score -= 6
-	}
-	return clampInt(score, 0, 100)
 }
 
 func netSplitHostPort(hostport string) (string, string, error) {

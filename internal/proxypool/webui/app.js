@@ -242,8 +242,6 @@ async function loadStats() {
   $("stTrans").textContent = s.transparent;
   $("stUnknown").textContent = s.unknown;
   $("stDelay").textContent = s.average_delay + "ms";
-  $("stScore").textContent = s.average_score || 0;
-  $("stHigh").textContent = s.high_quality || 0;
 }
 
 async function loadStatus() {
@@ -256,7 +254,6 @@ async function loadStatus() {
     const maintenance = s.maintenance || {};
     const outbound = s.outbound || {};
     box.innerHTML = [
-      statusCard("平均质量", s.proxy?.average_score || 0, `高质量 ${s.proxy?.high_quality || 0} 个`),
       statusCard("出口请求", outbound.total_dial || 0, `成功 ${outbound.ok_dial || 0} / 失败 ${outbound.fail_dial || 0}`),
       statusCard("检测任务", healthScheduler.running ? "运行中" : boolText[String(!!healthScheduler.enabled)], healthSchedulerSummary(healthScheduler)),
       statusCard("采集任务", s.running_jobs || 0, `任务记录 ${s.stored_jobs || 0}`),
@@ -399,7 +396,6 @@ function renderProxyRows(rows) {
       <td title="数据库 ID：${p.id}">${offset + index + 1}</td>
       <td class="mono">${escapeHTML(label)}</td>
       <td>${protocolBadges(p.tags || p.scheme)}</td>
-      <td>${qualityBadge(p.quality_score || 0)}</td>
       <td><span class="badge ${p.status}">${statusText[p.status] || p.status}</span>${enabledBadge}</td>
       <td><span class="badge ${p.anonymity}">${anonText[p.anonymity] || p.anonymity}</span></td>
       <td>${reachabilityBadge(p.reachability)}</td>
@@ -491,7 +487,6 @@ function closeProxyDrawer() {
 }
 
 function proxyDetailHTML(p) {
-  const parts = qualityBreakdown(p);
   return `
     <div class="drawer-actions">
       <button id="drawerCheckBtn" class="primary">立即检测</button>
@@ -516,54 +511,11 @@ function proxyDetailHTML(p) {
       <h3>来源</h3>
       <p>${escapeHTML(p.source || "无")}</p>
     </section>
-    <section class="detail-section">
-      <h3>质量分 ${p.quality_score || 0}</h3>
-      <div class="score-list">
-        ${parts.map((part) => `<div><span>${escapeHTML(part.label)}</span><strong class="${part.value >= 0 ? "score-plus" : "score-minus"}">${part.value >= 0 ? "+" : ""}${part.value}</strong></div>`).join("")}
-      </div>
-    </section>
   `;
 }
 
 function detailItem(label, value) {
   return `<div class="detail-item"><span>${escapeHTML(label)}</span><strong>${escapeHTML(value || "-")}</strong></div>`;
-}
-
-function qualityBreakdown(p) {
-  if (!p.enabled) {
-    return [{ label: "代理已禁用", value: -(p.quality_score || 0) }];
-  }
-  const parts = [{ label: "基础分", value: 45 }];
-  if (p.status === "available") parts.push({ label: "状态可用", value: 25 });
-  if (p.status === "unchecked") parts.push({ label: "尚未检测", value: 5 });
-  if (p.status === "unavailable") parts.push({ label: "状态不可用", value: -35 });
-  const attempts = (p.success_count || 0) + (p.fail_count || 0);
-  if (attempts > 0) {
-    parts.push({ label: "成功率奖励", value: Math.floor((p.success_count || 0) / attempts * 20) });
-    parts.push({ label: "失败率扣分", value: -Math.floor((p.fail_count || 0) / attempts * 12) });
-  }
-  if (p.fail_count > 0) parts.push({ label: "连续失败次数", value: -(p.fail_count || 0) * 6 });
-  if (p.latency_ms > 0) {
-    if (p.latency_ms <= 300) parts.push({ label: "低延迟", value: 18 });
-    else if (p.latency_ms <= 800) parts.push({ label: "延迟良好", value: 12 });
-    else if (p.latency_ms <= 1500) parts.push({ label: "延迟可接受", value: 6 });
-    else if (p.latency_ms > 4000) parts.push({ label: "高延迟", value: -10 });
-  }
-  if (p.anonymity === "anonymous") parts.push({ label: "匿名代理", value: 5 });
-  if (p.anonymity === "transparent") parts.push({ label: "透明代理", value: -5 });
-  if (p.reachability === "both") parts.push({ label: "双向可用", value: 8 });
-  if (p.reachability === "domestic" || p.reachability === "foreign") parts.push({ label: "单线路可用", value: 4 });
-  if (p.reachability === "none") parts.push({ label: "线路不可达", value: -25 });
-  if (p.target_capability === "both") parts.push({ label: "HTTP/HTTPS 目标", value: 8 });
-  if (p.target_capability === "https") parts.push({ label: "HTTPS 目标", value: 5 });
-  if (p.target_capability === "http") parts.push({ label: "HTTP 目标", value: 3 });
-  if (p.target_capability === "none") parts.push({ label: "目标不可达", value: -25 });
-  if (!p.last_checked) {
-    parts.push({ label: "未检测时间", value: -3 });
-  } else if (Date.now() - new Date(p.last_checked).getTime() > 24 * 60 * 60 * 1000) {
-    parts.push({ label: "检测结果较旧", value: -6 });
-  }
-  return parts;
 }
 
 async function checkAllProxies() {
@@ -691,7 +643,7 @@ async function loadSettings() {
   $("setAnonURL").value = c.anonymity_url;
   $("setServeAnon").value = c.serve_anonymity;
   $("setServeReach").value = c.serve_reachability || "any";
-  $("setServeStrategy").value = c.serve_strategy || "quality";
+  $("setServeStrategy").value = c.serve_strategy || "sequential";
   $("setConcurrency").value = c.check_concurrency;
   $("setCheckScheduleEnabled").value = String(c.check_schedule_enabled !== false);
   setIntervalFields(c.check_interval_seconds || 300);
@@ -1296,12 +1248,6 @@ function targetCapabilityBadge(value) {
   return `<span class="badge target ${key}">${targetText[key]}</span>`;
 }
 
-function qualityBadge(score) {
-  const n = Number(score || 0);
-  const level = n >= 70 ? "good" : n >= 40 ? "mid" : "low";
-  return `<span class="badge quality ${level}" title="质量分：${n}/100">${n}</span>`;
-}
-
 function tagItems(tags) {
   const seen = new Set();
   String(tags || "")
@@ -1725,7 +1671,7 @@ function statusDetail(s) {
   const outbound = s.outbound || {};
   return [
     `生成时间：${formatTime(s.generated_at)}`,
-    `代理：总数 ${s.proxy?.total || 0}，可用 ${s.proxy?.available || 0}，平均延迟 ${s.proxy?.average_delay || 0}ms，平均质量 ${s.proxy?.average_score || 0}`,
+    `代理：总数 ${s.proxy?.total || 0}，可用 ${s.proxy?.available || 0}，平均延迟 ${s.proxy?.average_delay || 0}ms`,
     `出口请求：总计 ${outbound.total_dial || 0}，成功 ${outbound.ok_dial || 0}，失败 ${outbound.fail_dial || 0}${outbound.last_error ? "，最近错误 " + outbound.last_error : ""}`,
     `检测任务：${healthScheduler.enabled ? "启用" : "关闭"}，${healthSchedulerSummary(healthScheduler)}`,
     `采集任务：运行中 ${s.running_jobs || 0}，任务记录 ${s.stored_jobs || 0}`,

@@ -19,7 +19,6 @@ type Proxy struct {
 	FailCount        int        `json:"fail_count"`
 	SuccessCount     int        `json:"success_count"`
 	LatencyMS        int64      `json:"latency_ms"`
-	QualityScore     int        `json:"quality_score"`
 	LastChecked      *time.Time `json:"last_checked,omitempty"`
 	LastUsed         *time.Time `json:"last_used,omitempty"`
 	CreatedAt        time.Time  `json:"created_at"`
@@ -102,8 +101,6 @@ type Stats struct {
 	Transparent  int `json:"transparent"`
 	Unknown      int `json:"unknown"`
 	AverageDelay int `json:"average_delay"`
-	AverageScore int `json:"average_score"`
-	HighQuality  int `json:"high_quality"`
 }
 
 type MaintenanceResult struct {
@@ -251,7 +248,7 @@ func defaultSettings() Settings {
 		AnonymityURL:          "https://httpbin.org/get",
 		ServeAnonymity:        "any",
 		ServeReachability:     "any",
-		ServeStrategy:         "quality",
+		ServeStrategy:         "sequential",
 		CollectorSources:      defaultCollectorSources(),
 		CollectorMode:         "direct",
 		CollectorProxy:        "",

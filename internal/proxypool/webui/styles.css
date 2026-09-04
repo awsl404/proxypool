@@ -534,25 +534,6 @@ tr:last-child td {
   color: #566a72;
 }
 
-.quality {
-  min-width: 46px;
-}
-
-.quality.good {
-  background: var(--ok-bg);
-  color: var(--ok);
-}
-
-.quality.mid {
-  background: var(--warn-bg);
-  color: var(--warn);
-}
-
-.quality.low {
-  background: var(--bad-bg);
-  color: var(--bad);
-}
-
 .status-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(180px, 1fr));
@@ -1093,8 +1074,7 @@ label {
 }
 
 .detail-item span,
-.detail-section p,
-.score-list span {
+.detail-section p {
   color: var(--muted);
 }
 
@@ -1117,32 +1097,6 @@ label {
 .detail-section p {
   margin: 0;
   word-break: break-all;
-}
-
-.score-list {
-  display: grid;
-  gap: 8px;
-}
-
-.score-list div {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 34px;
-  border-bottom: 1px solid var(--line);
-}
-
-.score-list div:last-child {
-  border-bottom: 0;
-}
-
-.score-plus {
-  color: var(--ok);
-}
-
-.score-minus {
-  color: var(--bad);
 }
 
 .task-result {

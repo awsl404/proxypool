@@ -487,3 +487,70 @@ func TestPaginatedLists(t *testing.T) {
 		t.Fatalf("unexpected custom page: %#v", customPage)
 	}
 }
+
+func TestSequentialStrategyRotatesByLastUsed(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	cfg, _ := store.Settings(ctx)
+	cfg.ServeStrategy = "sequential"
+
+	hosts := []string{"127.0.0.11", "127.0.0.12", "127.0.0.13"}
+	ids := map[string]int64{}
+	for _, host := range hosts {
+		if _, err := store.AddProxy(ctx, Proxy{Scheme: "http", Host: host, Port: 8080}); err != nil {
+			t.Fatal(err)
+		}
+		items, err := store.ListProxies(ctx, host, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, item := range items {
+			ids[item.Host] = item.ID
+		}
+	}
+	if len(ids) != len(hosts) {
+		t.Fatalf("expected %d proxies, got %d", len(hosts), len(ids))
+	}
+
+	pool := NewProxyPool(store)
+	// 依次轮询应严格按 last_used 升序：用过 MarkUsed 的代理排到最后。
+	seen := map[string]bool{}
+	for range hosts {
+		candidates, err := pool.Candidates(ctx, "", cfg, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(candidates) != 1 {
+			t.Fatalf("expected 1 candidate, got %d", len(candidates))
+		}
+		pick := candidates[0]
+		if seen[pick.Host] {
+			t.Fatalf("proxy %s served twice before rotation completed", pick.Host)
+		}
+		seen[pick.Host] = true
+		store.MarkUsed(ctx, pick.ID)
+	}
+	if len(seen) != len(hosts) {
+		t.Fatalf("expected all %d proxies rotated, got %v", len(hosts), seen)
+	}
+}
+
+func TestNormalizeServeStrategyMigratesRemovedValues(t *testing.T) {
+	cases := map[string]string{
+		"sequential":  "sequential",
+		"latency":     "latency",
+		"sticky":      "sticky",
+		"round_robin": "round_robin",
+		"quality":     "round_robin",
+		"weighted":    "round_robin",
+		"score":       "round_robin",
+		"balanced":    "round_robin",
+		"":            "round_robin",
+		"junk":        "round_robin",
+	}
+	for in, want := range cases {
+		if got := normalizeServeStrategy(in); got != want {
+			t.Errorf("normalizeServeStrategy(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

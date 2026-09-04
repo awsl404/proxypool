@@ -230,7 +230,55 @@ ORDER BY
   CASE status WHEN 'available' THEN 0 ELSE 1 END,
   fail_count ASC,
   CASE WHEN latency_ms = 0 THEN 999999 ELSE latency_ms END ASC,
-  COALESCE(last_used, '1970-01-01T00:00:00Z') ASC
+  COALESCE(last_used, '1970-01-01T00:00:00Z') ASC,
+  id ASC
+LIMIT sqlc.arg(row_limit);
+
+-- name: SequentialCandidateProxies :many
+SELECT
+  id,
+  scheme,
+  host,
+  port,
+  username,
+  password,
+  tags,
+  source,
+  anonymity,
+  reachability,
+  target_capability,
+  enabled,
+  status,
+  fail_count,
+  success_count,
+  latency_ms,
+  last_checked,
+  last_used,
+  created_at,
+  updated_at
+FROM proxies
+WHERE enabled = 1
+  AND status != 'unavailable'
+  AND (
+    sqlc.arg(scheme_filter) = ''
+    OR instr(',' || sqlc.arg(scheme_filter) || ',', ',' || scheme || ',') > 0
+  )
+  AND (sqlc.arg(anonymity_filter) = '' OR anonymity = sqlc.arg(anonymity_filter))
+  AND (
+    sqlc.arg(reachability_filter) = ''
+    OR reachability = sqlc.arg(reachability_filter)
+    OR (sqlc.arg(reachability_filter) = 'domestic' AND reachability = 'both')
+    OR (sqlc.arg(reachability_filter) = 'foreign' AND reachability = 'both')
+  )
+  AND (
+    sqlc.arg(target_capability_filter) = ''
+    OR target_capability = sqlc.arg(target_capability_filter)
+    OR (sqlc.arg(target_capability_filter) = 'http' AND target_capability = 'both')
+    OR (sqlc.arg(target_capability_filter) = 'https' AND target_capability = 'both')
+  )
+ORDER BY
+  COALESCE(last_used, '1970-01-01T00:00:00Z') ASC,
+  id ASC
 LIMIT sqlc.arg(row_limit);
 
 -- name: MarkProxyUsed :exec

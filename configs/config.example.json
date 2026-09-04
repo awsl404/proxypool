@@ -11,7 +11,7 @@
   "anonymity_url": "https://httpbin.org/get",
   "serve_anonymity": "any",
   "serve_reachability": "any",
-  "serve_strategy": "quality",
+  "serve_strategy": "sequential",
   "collector_sources": "http|https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt\nsocks5|https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt\nauto|https://example.com/mixed-proxies.txt",
   "collector_mode": "direct",
   "collector_proxy": "",
