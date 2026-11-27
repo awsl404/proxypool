@@ -257,7 +257,7 @@ async function loadStatus() {
       statusCard("出口请求", outbound.total_dial || 0, `成功 ${outbound.ok_dial || 0} / 失败 ${outbound.fail_dial || 0}`),
       statusCard("检测任务", healthScheduler.running ? "运行中" : boolText[String(!!healthScheduler.enabled)], healthSchedulerSummary(healthScheduler)),
       statusCard("采集任务", s.running_jobs || 0, `任务记录 ${s.stored_jobs || 0}`),
-      statusCard("数据库", formatBytes(s.db_size_bytes || 0), `日志 ${formatBytes(s.log_size_bytes || 0)}`),
+      statusCard("数据库", formatBytes((s.db_size_bytes || 0) + (s.wal_size_bytes || 0)), `主库 ${formatBytes(s.db_size_bytes || 0)} + WAL ${formatBytes(s.wal_size_bytes || 0)}`),
       statusCard("采集源", s.source_total || 0, `失败来源 ${s.source_failing || 0}`),
       statusCard("自定义模板", s.custom_total || 0, `启用 ${s.custom_enabled || 0}`),
       statusCard("定时采集", scheduler.running ? "运行中" : boolText[String(!!scheduler.enabled)], schedulerSummary(scheduler)),
@@ -674,6 +674,8 @@ async function loadSettings() {
   $("setMaintenanceInterval").value = c.maintenance_interval_seconds || 3600;
   $("setLogRetention").value = c.log_retention_days ?? 0;
   $("setSourceRetention").value = c.source_retention_days ?? 0;
+  $("setDeadRetention").value = c.dead_retention_days ?? 0;
+  $("setMaxDBSize").value = c.max_db_size_mb ?? 0;
   $("setBackupDir").value = c.backup_dir || "data/backups";
   $("setAutoBackup").value = String(c.auto_backup === true);
   $("setAutoVacuum").value = String(c.auto_vacuum !== false);
@@ -1555,6 +1557,8 @@ async function saveSettings() {
     maintenance_interval_seconds: Number($("setMaintenanceInterval").value),
     log_retention_days: Number($("setLogRetention").value),
     source_retention_days: Number($("setSourceRetention").value),
+    dead_retention_days: Number($("setDeadRetention").value),
+    max_db_size_mb: Number($("setMaxDBSize").value),
     backup_dir: $("setBackupDir").value,
     auto_backup: $("setAutoBackup").value === "true",
     auto_vacuum: $("setAutoVacuum").value === "true",
@@ -1660,7 +1664,10 @@ function maintenanceSummary(m) {
   if (m.next_run) parts.push(`下次 ${formatTime(m.next_run)}`);
   if (m.last_run) parts.push(`上次 ${formatTime(m.last_run)}`);
   const r = m.last_result;
-  if (r) parts.push(`清理 ${r.deleted_unavailable || 0} 个代理`);
+  if (r) {
+    parts.push(`清理 ${r.deleted_unavailable || 0} 个代理，${r.deleted_dead || 0} 条失效归档`);
+    if (r.over_limit_cleanup) parts.push("触发超限应急清理");
+  }
   return parts.join("，") || "暂无记录";
 }
 
@@ -1677,7 +1684,7 @@ function statusDetail(s) {
     `采集任务：运行中 ${s.running_jobs || 0}，任务记录 ${s.stored_jobs || 0}`,
     `定时采集：${scheduler.enabled ? "启用" : "关闭"}，${schedulerSummary(scheduler)}`,
     `数据维护：${maintenance.enabled ? "启用" : "关闭"}，${maintenanceSummary(maintenance)}`,
-    `存储：数据库 ${formatBytes(s.db_size_bytes || 0)}，日志 ${formatBytes(s.log_size_bytes || 0)}`,
+    `存储：数据库 ${formatBytes((s.db_size_bytes || 0) + (s.wal_size_bytes || 0))}（主库 ${formatBytes(s.db_size_bytes || 0)} + WAL ${formatBytes(s.wal_size_bytes || 0)}），日志 ${formatBytes(s.log_size_bytes || 0)}`,
   ].join("\n");
 }
 

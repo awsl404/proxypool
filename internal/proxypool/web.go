@@ -251,6 +251,7 @@ func (s *WebServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 		StoredJobs:      storedJobs,
 		HealthCheckBusy: checkBusy,
 		DBSizeBytes:     s.store.DBSize(),
+		WALSizeBytes:    s.store.WALSize(),
 		LogSizeBytes:    fileSize(cfg.LogFile),
 		SourceTotal:     sourceTotal,
 		SourceFailing:   sourceFailing,

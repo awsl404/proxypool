@@ -63,6 +63,8 @@ type Settings struct {
 	MaintenanceInterval   int    `json:"maintenance_interval_seconds"`
 	LogRetentionDays      int    `json:"log_retention_days"`
 	SourceRetentionDays   int    `json:"source_retention_days"`
+	DeadRetentionDays     int    `json:"dead_retention_days"`
+	MaxDBSizeMB           int    `json:"max_db_size_mb"`
 	BackupDir             string `json:"backup_dir"`
 	AutoBackup            bool   `json:"auto_backup"`
 	AutoVacuum            bool   `json:"auto_vacuum"`
@@ -106,9 +108,12 @@ type Stats struct {
 type MaintenanceResult struct {
 	DeletedUnavailable int64    `json:"deleted_unavailable"`
 	DeletedSources     int64    `json:"deleted_sources"`
+	DeletedDead        int64    `json:"deleted_dead"`
 	LogLinesRemoved    int      `json:"log_lines_removed"`
 	BackupPath         string   `json:"backup_path,omitempty"`
 	Vacuumed           bool     `json:"vacuumed"`
+	WALCheckpointed    bool     `json:"wal_checkpointed"`
+	OverLimitCleanup   bool     `json:"over_limit_cleanup,omitempty"`
 	Errors             []string `json:"errors,omitempty"`
 }
 
@@ -122,6 +127,7 @@ type RuntimeStatus struct {
 	StoredJobs      int                     `json:"stored_jobs"`
 	HealthCheckBusy bool                    `json:"health_check_busy"`
 	DBSizeBytes     int64                   `json:"db_size_bytes"`
+	WALSizeBytes    int64                   `json:"wal_size_bytes"`
 	LogSizeBytes    int64                   `json:"log_size_bytes"`
 	SourceTotal     int                     `json:"source_total"`
 	SourceFailing   int                     `json:"source_failing"`
@@ -264,6 +270,8 @@ func defaultSettings() Settings {
 		MaintenanceInterval:   3600,
 		LogRetentionDays:      7,
 		SourceRetentionDays:   30,
+		DeadRetentionDays:     30,
+		MaxDBSizeMB:           512,
 		BackupDir:             "data/backups",
 		AutoBackup:            false,
 		AutoVacuum:            true,

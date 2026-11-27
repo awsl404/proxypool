@@ -84,7 +84,7 @@ func runMaintenanceWithState(ctx context.Context, store *Store, cfg Settings) (M
 	maintenanceState.lastRun = &now
 	maintenanceState.result = &result
 	maintenanceState.mu.Unlock()
-	appInfo("maintenance finished deleted_unavailable=%d deleted_sources=%d log_removed=%d vacuum=%t backup=%s errors=%d", result.DeletedUnavailable, result.DeletedSources, result.LogLinesRemoved, result.Vacuumed, result.BackupPath, len(result.Errors))
+	appInfo("maintenance finished deleted_unavailable=%d deleted_sources=%d deleted_dead=%d log_removed=%d vacuum=%t wal_checkpoint=%t over_limit=%t backup=%s errors=%d", result.DeletedUnavailable, result.DeletedSources, result.DeletedDead, result.LogLinesRemoved, result.Vacuumed, result.WALCheckpointed, result.OverLimitCleanup, result.BackupPath, len(result.Errors))
 	return result, true
 }
 
@@ -96,20 +96,28 @@ func setMaintenanceNext(next time.Time) {
 
 func RunMaintenance(ctx context.Context, store *Store, cfg Settings) MaintenanceResult {
 	result := MaintenanceResult{}
-	if cfg.AutoCleanup {
-		deleted, err := store.DeleteUnavailable(ctx)
-		if err != nil {
-			result.Errors = append(result.Errors, err.Error())
-		} else {
-			result.DeletedUnavailable = deleted
-		}
-	}
 	if cfg.SourceRetentionDays > 0 {
 		deleted, err := store.DeleteOldSourceStats(ctx, cfg.SourceRetentionDays)
 		if err != nil {
 			result.Errors = append(result.Errors, err.Error())
 		} else {
 			result.DeletedSources = deleted
+		}
+	}
+	if cfg.DeadRetentionDays > 0 {
+		deleted, err := store.DeleteOldDeadProxies(ctx, cfg.DeadRetentionDays)
+		if err != nil {
+			result.Errors = append(result.Errors, err.Error())
+		} else {
+			result.DeletedDead = deleted
+		}
+	}
+	if cfg.AutoCleanup {
+		deleted, err := store.DeleteUnavailable(ctx)
+		if err != nil {
+			result.Errors = append(result.Errors, err.Error())
+		} else {
+			result.DeletedUnavailable = deleted
 		}
 	}
 	if cfg.LogRetentionDays > 0 {
@@ -128,19 +136,70 @@ func RunMaintenance(ctx context.Context, store *Store, cfg Settings) Maintenance
 			result.BackupPath = path
 		}
 	}
-	if cfg.AutoVacuum {
+	// WAL 兜底：主库 + WAL 超过上限时，先删旧数据再 checkpoint + VACUUM 回收空间。
+	if overLimit, limitBytes := store.dataOverLimit(cfg.MaxDBSizeMB); overLimit {
+		result.OverLimitCleanup = true
+		appWarn("database over size limit: data=%d limit=%d, running emergency cleanup", store.DataSize(), limitBytes)
+		if cfg.DeadRetentionDays <= 0 {
+			if deleted, err := store.DeleteOldDeadProxies(ctx, defaultSettings().DeadRetentionDays); err == nil {
+				result.DeletedDead += deleted
+			}
+		}
+		if cfg.SourceRetentionDays <= 0 {
+			if deleted, err := store.DeleteOldSourceStats(ctx, defaultSettings().SourceRetentionDays); err == nil {
+				result.DeletedSources += deleted
+			}
+		}
+	}
+	// 每次维护都 checkpoint，防止 WAL 持续增长；journal_size_limit 会在 checkpoint 后截断文件。
+	if err := store.CheckpointWAL(ctx); err != nil {
+		result.Errors = append(result.Errors, err.Error())
+	} else {
+		result.WALCheckpointed = true
+	}
+	if cfg.AutoVacuum || result.OverLimitCleanup {
 		if err := store.Vacuum(ctx); err != nil {
 			result.Errors = append(result.Errors, err.Error())
 		} else {
 			result.Vacuumed = true
 		}
+		// VACUUM 会重写整个库并产生大量 WAL 帧，结束后再截断一次。
+		if err := store.CheckpointWAL(ctx); err != nil {
+			result.Errors = append(result.Errors, err.Error())
+		}
 	}
 	return result
+}
+
+// dataOverLimit 判断主库 + WAL 是否超过配置的大小上限（MB）。上限为 0 表示不限制。
+func (s *Store) dataOverLimit(maxSizeMB int) (bool, int64) {
+	if maxSizeMB <= 0 {
+		return false, 0
+	}
+	limitBytes := int64(maxSizeMB) * 1024 * 1024
+	return s.DataSize() > limitBytes, limitBytes
 }
 
 func (s *Store) Vacuum(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, "VACUUM")
 	return err
+}
+
+// CheckpointWAL 执行 WAL checkpoint 并截断 -wal 文件。
+// PASSIVE 允许并发读写；未被活跃读事务覆盖的帧都会回写主库并重置 WAL。
+func (s *Store) CheckpointWAL(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, "PRAGMA wal_checkpoint(PASSIVE)")
+	return err
+}
+
+// WALSize 返回 -wal 文件大小（字节），文件不存在时返回 0。
+func (s *Store) WALSize() int64 {
+	return fileSize(s.path + "-wal")
+}
+
+// DataSize 返回主库与 WAL 文件大小之和（字节）。
+func (s *Store) DataSize() int64 {
+	return s.DBSize() + s.WALSize()
 }
 
 func (s *Store) Backup(ctx context.Context, dir string) (string, error) {
@@ -164,6 +223,20 @@ func (s *Store) DeleteOldSourceStats(ctx context.Context, days int) (int64, erro
 	}
 	cutoff := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour)
 	res, err := s.db.ExecContext(ctx, `DELETE FROM source_stats WHERE last_run IS NOT NULL AND last_run < ?`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// DeleteOldDeadProxies 删除 updated_at 早于保留期的失效代理归档。
+// disabled=1 的记录（用户手动禁用保留的）不受保留期影响。
+func (s *Store) DeleteOldDeadProxies(ctx context.Context, days int) (int64, error) {
+	if days <= 0 {
+		return 0, nil
+	}
+	cutoff := time.Now().UTC().Add(-time.Duration(days) * 24 * time.Hour)
+	res, err := s.db.ExecContext(ctx, `DELETE FROM dead_proxies WHERE disabled = 0 AND updated_at < ?`, cutoff)
 	if err != nil {
 		return 0, err
 	}

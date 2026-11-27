@@ -163,6 +163,12 @@ func normalizeSettings(cfg Settings) Settings {
 	if cfg.SourceRetentionDays < 0 {
 		cfg.SourceRetentionDays = def.SourceRetentionDays
 	}
+	if cfg.DeadRetentionDays < 0 {
+		cfg.DeadRetentionDays = def.DeadRetentionDays
+	}
+	if cfg.MaxDBSizeMB < 0 {
+		cfg.MaxDBSizeMB = def.MaxDBSizeMB
+	}
 	if cfg.BackupDir == "" {
 		cfg.BackupDir = def.BackupDir
 	}

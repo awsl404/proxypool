@@ -280,6 +280,8 @@
           <label>维护间隔秒数<input id="setMaintenanceInterval" type="number" min="60"></label>
           <label>日志保留天数<input id="setLogRetention" type="number" min="0" placeholder="0 不裁剪"></label>
           <label>来源统计保留天数<input id="setSourceRetention" type="number" min="0" placeholder="0 不清理"></label>
+          <label>失效归档保留天数<input id="setDeadRetention" type="number" min="0" placeholder="0 不清理"></label>
+          <label>数据库大小上限 MB<input id="setMaxDBSize" type="number" min="0" placeholder="0 不限制"></label>
           <label>备份目录<input id="setBackupDir" placeholder="data/backups"></label>
           <label>自动备份<select id="setAutoBackup"><option value="false">关闭</option><option value="true">启用</option></select></label>
           <label>自动压缩数据库<select id="setAutoVacuum"><option value="true">启用</option><option value="false">关闭</option></select></label>

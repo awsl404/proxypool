@@ -33,6 +33,18 @@ func OpenStore(path string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
+	// WAL 模式下必须限制 journal 文件大小，否则 -wal 文件会无限增长。
+	// 512MB：checkpoint 完成后 WAL 超过该值会被截断（journal_size_limit 仅在 checkpoint 后生效）。
+	for _, pragma := range []string{
+		"PRAGMA journal_size_limit = 536870912",
+		"PRAGMA busy_timeout = 5000",
+		"PRAGMA synchronous = NORMAL",
+	} {
+		if _, err := db.Exec(pragma); err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+	}
 	s := &Store{db: db, queries: storage.New(db), path: path}
 	if err := s.migrate(context.Background()); err != nil {
 		_ = db.Close()
@@ -657,6 +669,8 @@ func (s *Store) ensureDefaultSettings(ctx context.Context) error {
 		"maintenance_interval_seconds":   strconv.Itoa(def.MaintenanceInterval),
 		"log_retention_days":             strconv.Itoa(def.LogRetentionDays),
 		"source_retention_days":          strconv.Itoa(def.SourceRetentionDays),
+		"dead_retention_days":            strconv.Itoa(def.DeadRetentionDays),
+		"max_db_size_mb":                 strconv.Itoa(def.MaxDBSizeMB),
 		"backup_dir":                     def.BackupDir,
 		"auto_backup":                    boolString(def.AutoBackup),
 		"auto_vacuum":                    boolString(def.AutoVacuum),
@@ -763,6 +777,10 @@ func (s *Store) Settings(ctx context.Context) (Settings, error) {
 			cfg.LogRetentionDays = parseNonNegative(v, cfg.LogRetentionDays)
 		case "source_retention_days":
 			cfg.SourceRetentionDays = parseNonNegative(v, cfg.SourceRetentionDays)
+		case "dead_retention_days":
+			cfg.DeadRetentionDays = parseNonNegative(v, cfg.DeadRetentionDays)
+		case "max_db_size_mb":
+			cfg.MaxDBSizeMB = parseNonNegative(v, cfg.MaxDBSizeMB)
 		case "backup_dir":
 			cfg.BackupDir = v
 		case "auto_backup":
@@ -868,6 +886,8 @@ func (s *Store) UpdateSettings(ctx context.Context, cfg Settings) error {
 		"maintenance_interval_seconds":   strconv.Itoa(maxInt(60, cfg.MaintenanceInterval)),
 		"log_retention_days":             strconv.Itoa(maxInt(0, cfg.LogRetentionDays)),
 		"source_retention_days":          strconv.Itoa(maxInt(0, cfg.SourceRetentionDays)),
+		"dead_retention_days":            strconv.Itoa(maxInt(0, cfg.DeadRetentionDays)),
+		"max_db_size_mb":                 strconv.Itoa(maxInt(0, cfg.MaxDBSizeMB)),
 		"backup_dir":                     firstNonEmpty(cfg.BackupDir, current.BackupDir, def.BackupDir),
 		"auto_backup":                    boolString(cfg.AutoBackup),
 		"auto_vacuum":                    boolString(cfg.AutoVacuum),
