@@ -33,8 +33,9 @@ func OpenStore(path string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	// WAL 模式下必须限制 journal 文件大小，否则 -wal 文件会无限增长。
-	// 512MB：checkpoint 完成后 WAL 超过该值会被截断（journal_size_limit 仅在 checkpoint 后生效）。
+	// journal_size_limit controls retained journal space after WAL reuse/reset;
+	// it is not a hard cap on a live WAL pinned by a reader. A separate periodic
+	// TRUNCATE checkpoint reclaims space and reports readers blocking progress.
 	for _, pragma := range []string{
 		"PRAGMA journal_size_limit = 536870912",
 		"PRAGMA busy_timeout = 5000",

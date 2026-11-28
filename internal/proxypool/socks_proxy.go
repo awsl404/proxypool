@@ -55,40 +55,54 @@ func handleSOCKS5Client(parent context.Context, client net.Conn, store *Store, p
 	if err != nil {
 		return
 	}
-	if err := writeSOCKS5Reply(client, 0x00); err != nil {
-		return
-	}
-	_ = client.SetDeadline(time.Time{})
-	initial, err := readInitialClientBytes(client, cfg)
-	if err != nil {
-		return
-	}
-	replayable := replayableTunnelInitial(initial)
 	limit := maxServeProxyAttempts
-	if !replayable {
-		limit = 1
-	}
 	candidates, err := pool.CandidatesForSchemes(parent, target, cfg, limit, "socks5")
 	if err != nil || len(candidates) == 0 {
+		_ = writeSOCKS5Reply(client, 0x04)
 		return
 	}
 	next := 0
+	var initial []byte
+	replied := false
 	for attempt := 0; attempt < limit && next < len(candidates); attempt++ {
 		ctx, cancel := context.WithTimeout(parent, time.Duration(cfg.TimeoutSeconds)*time.Second)
 		upstream, used, newNext, err := dialServingCandidate(ctx, pool, target, cfg, candidates, next)
 		cancel()
 		next = newNext
 		if err != nil {
+			if !replied {
+				_ = writeSOCKS5Reply(client, 0x04)
+			}
 			return
+		}
+		if !replied {
+			// Upstream dialing may legitimately outlast the client handshake deadline.
+			_ = client.SetDeadline(time.Now().Add(20 * time.Second))
+			if err := writeSOCKS5Reply(client, 0x00); err != nil {
+				_ = upstream.Close()
+				return
+			}
+			replied = true
+			_ = client.SetDeadline(time.Time{})
+			initial, err = readInitialClientBytes(client, cfg)
+			if err != nil {
+				_ = upstream.Close()
+				return
+			}
+		}
+		replayable := replayableTunnelInitial(initial)
+		if !replayable {
+			limit = attempt + 1
 		}
 		gatewayFailure, _, err := writeInitialAndRelay(client, upstream, initial, cfg)
 		_ = upstream.Close()
-		if gatewayFailure && replayable && attempt+1 < limit {
+		if gatewayFailure && replayable && attempt+1 < limit && next < len(candidates) {
 			markServingGatewayFailure(store, used, cfg)
 			continue
 		}
 		if gatewayFailure {
 			markServingGatewayFailure(store, used, cfg)
+			_, _ = io.WriteString(client, "HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n")
 		}
 		_ = err
 		return

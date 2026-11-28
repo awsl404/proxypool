@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"sort"
@@ -16,12 +17,27 @@ import (
 	"time"
 )
 
+type loginAttempt struct {
+	windowStarted time.Time
+	failures      int
+}
+
+const (
+	loginFailureWindow = time.Minute
+	loginFailureLimit  = 5
+	maxLoginEntries    = 4096
+	maxSessions        = 4096
+	maxRunningJobs     = 4
+	maxCollectorJobs   = 100
+)
+
 type WebServer struct {
 	store      *Store
 	pool       *ProxyPool
 	configPath string
 	sessions   map[string]time.Time
 	jobs       map[string]*CollectorJob
+	loginFails map[string]loginAttempt
 	checking   bool
 	mu         sync.Mutex
 }
@@ -44,6 +60,7 @@ func NewWebServer(store *Store, pool *ProxyPool, configPath string) *WebServer {
 		configPath: configPath,
 		sessions:   map[string]time.Time{},
 		jobs:       map[string]*CollectorJob{},
+		loginFails: map[string]loginAttempt{},
 	}
 }
 
@@ -166,6 +183,12 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	remote := loginRemoteKey(r.RemoteAddr)
+	if !s.allowLoginAttempt(remote) {
+		w.Header().Set("Retry-After", "60")
+		writeError(w, http.StatusTooManyRequests, errors.New("too many login attempts"))
+		return
+	}
 	cfg, err := s.store.Settings(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -176,13 +199,78 @@ func (s *WebServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, errors.New("invalid credentials"))
 		return
 	}
+	s.clearLoginFailures(remote)
 	token := randomToken()
+	now := time.Now()
 	s.mu.Lock()
-	s.sessions[token] = time.Now().Add(24 * time.Hour)
+	s.pruneSessionsLocked(now)
+	if len(s.sessions) >= maxSessions {
+		s.mu.Unlock()
+		writeError(w, http.StatusServiceUnavailable, errors.New("session capacity reached"))
+		return
+	}
+	s.sessions[token] = now.Add(24 * time.Hour)
 	s.mu.Unlock()
 	http.SetCookie(w, &http.Cookie{Name: "pp_session", Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, Expires: time.Now().Add(24 * time.Hour)})
 	appInfo("login success user=%s remote=%s", body.Username, r.RemoteAddr)
 	writeJSON(w, map[string]any{"ok": true})
+}
+
+func loginRemoteKey(remote string) string {
+	if host, _, err := net.SplitHostPort(remote); err == nil {
+		return host
+	}
+	return remote
+}
+
+func (s *WebServer) loginRateLimited(remote string) bool {
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pruneLoginFailuresLocked(now)
+	attempt, ok := s.loginFails[remote]
+	return ok && attempt.failures >= loginFailureLimit
+}
+
+// allowLoginAttempt reserves a slot before credential verification, so parallel
+// requests cannot all pass the check before any failure is recorded.
+func (s *WebServer) allowLoginAttempt(remote string) bool {
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pruneLoginFailuresLocked(now)
+	attempt, ok := s.loginFails[remote]
+	if ok && now.Sub(attempt.windowStarted) < loginFailureWindow && attempt.failures >= loginFailureLimit {
+		return false
+	}
+	if !ok && len(s.loginFails) >= maxLoginEntries {
+		return false
+	}
+	if !ok || now.Sub(attempt.windowStarted) >= loginFailureWindow {
+		attempt = loginAttempt{windowStarted: now}
+	}
+	attempt.failures++
+	s.loginFails[remote] = attempt
+	return true
+}
+
+func (s *WebServer) pruneLoginFailuresLocked(now time.Time) {
+	for key, attempt := range s.loginFails {
+		if now.Sub(attempt.windowStarted) >= loginFailureWindow {
+			delete(s.loginFails, key)
+		}
+	}
+}
+
+func (s *WebServer) recordLoginFailure(remote string) {
+	// Kept for direct callers/tests; request paths reserve atomically in advance.
+	_ = s.allowLoginAttempt(remote)
+}
+
+func (s *WebServer) clearLoginFailures(remote string) {
+	s.mu.Lock()
+	delete(s.loginFails, remote)
+	s.mu.Unlock()
 }
 
 func (s *WebServer) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -535,11 +623,11 @@ func (s *WebServer) handleCollectorRun(w http.ResponseWriter, r *http.Request) {
 	id := randomToken()
 	jobCtx, cancel := context.WithCancel(context.Background())
 	job := &CollectorJob{ID: id, Status: "running", StartedAt: time.Now().UTC(), cancel: cancel}
-	s.mu.Lock()
-	s.jobs[id] = job
-	s.appendCollectorJobLogLocked(job, "任务已创建")
-	s.pruneCollectorJobsLocked()
-	s.mu.Unlock()
+	if !s.registerCollectorJob(id, job) {
+		cancel()
+		writeError(w, http.StatusTooManyRequests, errors.New("too many running collector jobs"))
+		return
+	}
 	go func() {
 		appInfo("collector job started id=%s", id)
 		result := CollectFreeProxies(jobCtx, s.store, s.pool, cfg, req, s.collectorJobLogger(id))
@@ -927,11 +1015,11 @@ func (s *WebServer) handleCustomScraperRun(w http.ResponseWriter, r *http.Reques
 	jobID := randomToken()
 	jobCtx, cancel := context.WithCancel(context.Background())
 	job := &CollectorJob{ID: jobID, Status: "running", StartedAt: time.Now().UTC(), cancel: cancel}
-	s.mu.Lock()
-	s.jobs[jobID] = job
-	s.appendCollectorJobLogLocked(job, "任务已创建")
-	s.pruneCollectorJobsLocked()
-	s.mu.Unlock()
+	if !s.registerCollectorJob(jobID, job) {
+		cancel()
+		writeError(w, http.StatusTooManyRequests, errors.New("too many running collector jobs"))
+		return
+	}
 	go func() {
 		appInfo("custom scraper job started id=%s template=%d", jobID, id)
 		result := RunCustomScraper(jobCtx, s.store, s.pool, cfg, req, s.collectorJobLogger(jobID))
@@ -951,6 +1039,27 @@ func (s *WebServer) handleCustomScraperRun(w http.ResponseWriter, r *http.Reques
 		appInfo("custom scraper job finished id=%s template=%d imported=%d duplicates=%d failed=%d", jobID, id, result.Imported, result.Duplicates, result.Failed)
 	}()
 	writeJSON(w, map[string]any{"job_id": jobID, "status": "running"})
+}
+
+func (s *WebServer) registerCollectorJob(id string, job *CollectorJob) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	running := 0
+	for _, existing := range s.jobs {
+		if existing.Status == "running" || existing.Status == "stopping" {
+			running++
+		}
+	}
+	if running >= maxRunningJobs {
+		return false
+	}
+	// Insert under the same lock, then evict the oldest terminal record. At
+	// exactly the history cap, pruning before insertion would evict nothing and
+	// permanently reject all future jobs despite having no active work.
+	s.jobs[id] = job
+	s.appendCollectorJobLogLocked(job, "任务已创建")
+	s.pruneCollectorJobsLocked()
+	return true
 }
 
 func (s *WebServer) collectorJobLogger(id string) CollectorLogger {
@@ -980,13 +1089,30 @@ func fmtLog(format string, args ...any) string {
 }
 
 func (s *WebServer) pruneCollectorJobsLocked() {
-	if len(s.jobs) <= 20 {
+	if len(s.jobs) < maxCollectorJobs {
 		return
 	}
+	type terminalJob struct {
+		id string
+		at time.Time
+	}
+	var terminal []terminalJob
 	for id, job := range s.jobs {
-		if job.Status == "done" && job.FinishedAt != nil && time.Since(*job.FinishedAt) > time.Hour {
-			delete(s.jobs, id)
+		if job.Status == "running" || job.Status == "stopping" {
+			continue
 		}
+		at := job.StartedAt
+		if job.FinishedAt != nil {
+			at = *job.FinishedAt
+		}
+		terminal = append(terminal, terminalJob{id: id, at: at})
+	}
+	sort.Slice(terminal, func(i, j int) bool { return terminal[i].at.Before(terminal[j].at) })
+	for _, job := range terminal {
+		if len(s.jobs) <= maxCollectorJobs {
+			break
+		}
+		delete(s.jobs, job.id)
 	}
 }
 
@@ -1033,15 +1159,25 @@ func (s *WebServer) requireSession(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func (s *WebServer) pruneSessionsLocked(now time.Time) {
+	for token, exp := range s.sessions {
+		if !now.Before(exp) {
+			delete(s.sessions, token)
+		}
+	}
+}
+
 func (s *WebServer) hasSession(r *http.Request) bool {
 	c, err := r.Cookie("pp_session")
 	if err != nil {
 		return false
 	}
+	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.pruneSessionsLocked(now)
 	exp, ok := s.sessions[c.Value]
-	if !ok || time.Now().After(exp) {
+	if !ok || !now.Before(exp) {
 		delete(s.sessions, c.Value)
 		return false
 	}

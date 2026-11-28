@@ -1,6 +1,7 @@
 package proxypool
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -126,6 +127,24 @@ func inspectUpstreamPreludeAndRelay(client, upstream net.Conn, cfg Settings) (bo
 	_ = upstream.SetReadDeadline(time.Now().Add(timeout))
 	buf := make([]byte, 64*1024)
 	n, err := upstream.Read(buf)
+	// TCP reads are not HTTP message boundaries. Accumulate a bounded HTTP
+	// header before classification; non-HTTP tunnels remain byte-transparent.
+	for err == nil && n < len(buf) {
+		prefix := buf[:n]
+		if n < len("HTTP/") {
+			if !bytes.HasPrefix([]byte("HTTP/"), prefix) {
+				break
+			}
+		} else if !bytes.HasPrefix(prefix, []byte("HTTP/")) || bytes.Contains(prefix, []byte("\r\n\r\n")) {
+			break
+		}
+		more, readErr := upstream.Read(buf[n:])
+		n += more
+		err = readErr
+		if more == 0 && readErr == nil {
+			break
+		}
+	}
 	_ = upstream.SetReadDeadline(time.Time{})
 	if n > 0 {
 		prelude := append([]byte(nil), buf[:n]...)

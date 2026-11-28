@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestTailFileFiltersQueryAndLevel(t *testing.T) {
@@ -25,6 +26,41 @@ func TestTailFileFiltersQueryAndLevel(t *testing.T) {
 	}
 	if len(lines) != 1 || lines[0] != "2026-01-01 00:00:02 [ERROR] collector failed" {
 		t.Fatalf("unexpected filtered lines: %#v", lines)
+	}
+}
+
+func TestLoginFailureLimit(t *testing.T) {
+	store := newTestStore(t)
+	server := NewWebServer(store, NewProxyPool(store), "")
+	remote := "127.0.0.1"
+	for i := 0; i < loginFailureLimit; i++ {
+		server.recordLoginFailure(remote)
+	}
+	if !server.loginRateLimited(remote) {
+		t.Fatal("expected remote to be rate limited")
+	}
+	server.clearLoginFailures(remote)
+	if server.loginRateLimited(remote) {
+		t.Fatal("successful login reset should clear failures")
+	}
+	server.mu.Lock()
+	server.loginFails[remote] = loginAttempt{windowStarted: time.Now().Add(-loginFailureWindow), failures: loginFailureLimit}
+	server.mu.Unlock()
+	if server.loginRateLimited(remote) {
+		t.Fatal("expired failure window should no longer be limited")
+	}
+}
+
+func TestRegisterCollectorJobLimit(t *testing.T) {
+	store := newTestStore(t)
+	server := NewWebServer(store, NewProxyPool(store), "")
+	for i := 0; i < maxRunningJobs; i++ {
+		if !server.registerCollectorJob(string(rune('a'+i)), &CollectorJob{Status: "running"}) {
+			t.Fatalf("job %d unexpectedly rejected", i)
+		}
+	}
+	if server.registerCollectorJob("overflow", &CollectorJob{Status: "running"}) {
+		t.Fatal("expected running-job limit to reject overflow")
 	}
 }
 

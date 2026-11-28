@@ -2,6 +2,7 @@ package proxypool
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,6 +17,33 @@ func newTestStore(t *testing.T) *Store {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	return store
+}
+
+func TestBackupContainsCommittedWALData(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	if _, err := store.AddProxy(ctx, Proxy{Scheme: "http", Host: "192.0.2.10", Port: 8080}); err != nil {
+		t.Fatal(err)
+	}
+	if store.WALSize() == 0 {
+		t.Fatal("expected committed data to remain in WAL before backup")
+	}
+	backup, err := store.Backup(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", backup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var count int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM proxies WHERE host = ?`, "192.0.2.10").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("backup omitted committed row: count=%d", count)
+	}
 }
 
 func TestImportDeduplicates(t *testing.T) {

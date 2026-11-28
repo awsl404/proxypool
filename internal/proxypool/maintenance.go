@@ -3,7 +3,7 @@ package proxypool
 import (
 	"context"
 	"database/sql"
-	"io"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -27,6 +27,9 @@ var maintenanceState = struct {
 }{}
 
 func StartMaintenanceLoop(ctx context.Context, store *Store) {
+	// WAL housekeeping must not depend on optional (potentially destructive)
+	// retention/backup maintenance. Only checkpoint here; never delete user data.
+	go runWALCheckpointLoop(ctx, store, time.Minute)
 	go func() {
 		for {
 			cfg, err := store.Settings(ctx)
@@ -49,6 +52,26 @@ func StartMaintenanceLoop(ctx context.Context, store *Store) {
 			_, _ = runMaintenanceWithState(ctx, store, cfg)
 		}
 	}()
+}
+
+func runWALCheckpointLoop(ctx context.Context, store *Store, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if ctx.Err() != nil {
+				return
+			}
+			// Finish the current bounded checkpoint before stopping. Cancelling
+			// SQLite mid-checkpoint races connection cleanup on Windows.
+			if err := store.CheckpointWAL(context.WithoutCancel(ctx)); err != nil && ctx.Err() == nil {
+				appWarn("WAL checkpoint deferred: %v", err)
+			}
+		}
+	}
 }
 
 func MaintenanceStatus(enabled bool) MaintenanceSnapshot {
@@ -141,17 +164,21 @@ func RunMaintenance(ctx context.Context, store *Store, cfg Settings) Maintenance
 		result.OverLimitCleanup = true
 		appWarn("database over size limit: data=%d limit=%d, running emergency cleanup", store.DataSize(), limitBytes)
 		if cfg.DeadRetentionDays <= 0 {
-			if deleted, err := store.DeleteOldDeadProxies(ctx, defaultSettings().DeadRetentionDays); err == nil {
+			if deleted, err := store.DeleteOldDeadProxies(ctx, defaultSettings().DeadRetentionDays); err != nil {
+				result.Errors = append(result.Errors, err.Error())
+			} else {
 				result.DeletedDead += deleted
 			}
 		}
 		if cfg.SourceRetentionDays <= 0 {
-			if deleted, err := store.DeleteOldSourceStats(ctx, defaultSettings().SourceRetentionDays); err == nil {
+			if deleted, err := store.DeleteOldSourceStats(ctx, defaultSettings().SourceRetentionDays); err != nil {
+				result.Errors = append(result.Errors, err.Error())
+			} else {
 				result.DeletedSources += deleted
 			}
 		}
 	}
-	// 每次维护都 checkpoint，防止 WAL 持续增长；journal_size_limit 会在 checkpoint 后截断文件。
+	// 每次维护显式 TRUNCATE checkpoint；被活跃事务阻止时记录错误，随后重试。
 	if err := store.CheckpointWAL(ctx); err != nil {
 		result.Errors = append(result.Errors, err.Error())
 	} else {
@@ -167,6 +194,9 @@ func RunMaintenance(ctx context.Context, store *Store, cfg Settings) Maintenance
 		if err := store.CheckpointWAL(ctx); err != nil {
 			result.Errors = append(result.Errors, err.Error())
 		}
+	}
+	if over, limit := store.dataOverLimit(cfg.MaxDBSizeMB); over {
+		result.Errors = append(result.Errors, fmt.Sprintf("database remains above maintenance threshold: data=%d limit=%d; live records are retained", store.DataSize(), limit))
 	}
 	return result
 }
@@ -185,11 +215,19 @@ func (s *Store) Vacuum(ctx context.Context) error {
 	return err
 }
 
-// CheckpointWAL 执行 WAL checkpoint 并截断 -wal 文件。
-// PASSIVE 允许并发读写；未被活跃读事务覆盖的帧都会回写主库并重置 WAL。
+// CheckpointWAL 回写并实际截断 WAL。忙碌的外部读事务可能阻止截断，
+// 必须检查 SQLite 返回的 busy 状态，不能把执行 PRAGMA 成功当作截断成功。
 func (s *Store) CheckpointWAL(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, "PRAGMA wal_checkpoint(PASSIVE)")
-	return err
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var busy, frames, checkpointed int
+	if err := s.db.QueryRowContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &frames, &checkpointed); err != nil {
+		return err
+	}
+	if busy != 0 || frames > checkpointed {
+		return fmt.Errorf("WAL checkpoint busy: frames=%d checkpointed=%d", frames, checkpointed)
+	}
+	return nil
 }
 
 // WALSize 返回 -wal 文件大小（字节），文件不存在时返回 0。
@@ -203,15 +241,16 @@ func (s *Store) DataSize() int64 {
 }
 
 func (s *Store) Backup(ctx context.Context, dir string) (string, error) {
-	_ = ctx
 	if dir == "" {
 		dir = defaultSettings().BackupDir
 	}
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", err
 	}
-	dst := filepath.Join(dir, "proxypool-"+time.Now().Format("20060102-150405")+".db")
-	if err := copyFile(s.path, dst); err != nil {
+	dst := filepath.Join(dir, "proxypool-"+time.Now().UTC().Format("20060102-150405.000000000")+".db")
+	// VACUUM INTO creates a consistent, standalone SQLite snapshot, including committed
+	// transactions that may still reside in the source database's WAL file.
+	if _, err := s.db.ExecContext(ctx, `VACUUM INTO ?`, dst); err != nil {
 		return "", err
 	}
 	return dst, nil
@@ -268,23 +307,6 @@ func fileSize(path string) int64 {
 		return 0
 	}
 	return info.Size()
-}
-
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-	if _, err := io.Copy(out, in); err != nil {
-		return err
-	}
-	return out.Sync()
 }
 
 func nullTimePtr(v sql.NullTime) *time.Time {

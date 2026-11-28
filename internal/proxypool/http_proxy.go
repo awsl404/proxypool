@@ -123,24 +123,27 @@ func (h *HTTPProxy) handlePlainHTTPWithRetry(w http.ResponseWriter, r *http.Requ
 		cancel()
 		next = newNext
 		if err != nil {
+			_, _ = io.WriteString(client, "HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n")
 			return nil
 		}
 		if err := r.Write(upstream); err != nil {
 			_ = upstream.Close()
 			markServingGatewayFailure(h.store, used, cfg)
-			if replayable && attempt+1 < limit {
+			if replayable && attempt+1 < limit && next < len(candidates) {
 				continue
 			}
+			_, _ = io.WriteString(client, "HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n")
 			return nil
 		}
 		gatewayFailure, _, err := inspectUpstreamPreludeAndRelay(client, upstream, cfg)
 		_ = upstream.Close()
-		if gatewayFailure && replayable && attempt+1 < limit {
+		if gatewayFailure && replayable && attempt+1 < limit && next < len(candidates) {
 			markServingGatewayFailure(h.store, used, cfg)
 			continue
 		}
 		if gatewayFailure {
 			markServingGatewayFailure(h.store, used, cfg)
+			_, _ = io.WriteString(client, "HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n")
 		}
 		_ = err
 		return nil

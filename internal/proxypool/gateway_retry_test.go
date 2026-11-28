@@ -1,6 +1,31 @@
 package proxypool
 
-import "testing"
+import (
+	"net"
+	"testing"
+)
+
+func TestGatewayPreludeSplitAcrossReads(t *testing.T) {
+	upstream, sender := net.Pipe()
+	defer upstream.Close()
+	defer sender.Close()
+	client, receiver := net.Pipe()
+	defer client.Close()
+	defer receiver.Close()
+	go func() {
+		defer sender.Close()
+		// Each pipe write must be consumed separately: deterministically model TCP fragmentation.
+		for _, part := range []string{"HT", "TP/1.1 502 Bad ", "Gateway\r\n", "Server: test\r\n\r\n"} {
+			if _, err := sender.Write([]byte(part)); err != nil {
+				return
+			}
+		}
+	}()
+	gateway, prelude, err := inspectUpstreamPreludeAndRelay(client, upstream, Settings{TimeoutSeconds: 1})
+	if err != nil || !gateway {
+		t.Fatalf("fragmented error was not classified: gateway=%t prelude=%q err=%v", gateway, prelude, err)
+	}
+}
 
 func TestProxyGatewayHTTPPreludeDetection(t *testing.T) {
 	body := "HTTP/1.1 501 Gateway error\r\n" +
